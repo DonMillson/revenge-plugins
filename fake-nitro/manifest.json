@@ -1,0 +1,1 @@
+{"name":"FakeNitro Mobile","description":"Vencord-style FakeNitro for Revenge Classic: unlocks emoji selection locally and converts otherwise unusable custom/animated emoji to Discord CDN links when sending. Does not grant a Nitro subscription.","authors":[{"name":"DonMillson","id":"0"}],"main":"index.js","vendetta":{"icon":"img_nitro_emojis"}}
