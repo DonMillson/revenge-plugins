@@ -16,6 +16,7 @@ var unpatches=[];
 var patchedTypingComponents=typeof WeakSet!=="undefined"?new WeakSet():null;
 var CUSTOM_SKU="donmillson-local-decoration";
 var CUSTOM_ASSET="donmillson_custom_decoration";
+var myUserId=null;
 
 function defaults(){
   storage.typingEnabled ??= true;
@@ -40,10 +41,17 @@ function currentUserStore(){
   try{return metro.findByStoreName("UserStore")}catch(_){return null}
 }
 function currentId(){
+  return myUserId;
+}
+
+function captureCurrentId(){
+  if(myUserId) return myUserId;
   try{
     var s=currentUserStore();
-    return s&&s.getCurrentUser&&s.getCurrentUser()?.id||null;
-  }catch(_){return null}
+    var u=s&&s.getCurrentUser&&s.getCurrentUser();
+    if(u&&u.id) myUserId=String(u.id);
+  }catch(_){}
+  return myUserId;
 }
 
 function mediaUri(key){
@@ -293,7 +301,10 @@ function patchProfileMedia(){
       unpatches.push(patcher.after("getUser",UserStore,function(_args,ret){return applyUser(ret)}));
     }
     if(typeof UserStore.getCurrentUser==="function"){
-      unpatches.push(patcher.after("getCurrentUser",UserStore,function(_args,ret){return applyUser(ret)}));
+      unpatches.push(patcher.after("getCurrentUser",UserStore,function(_args,ret){
+        try{if(ret&&ret.id&&!myUserId) myUserId=String(ret.id)}catch(_){}
+        return applyUser(ret);
+      }));
     }
   }
 
@@ -536,16 +547,28 @@ function Settings(){
 
 function onLoad(){
   defaults();
-  patchTypingIndicator();
-  patchProfileMedia();
-  patchNickColor();
-  refreshDiscord();
-  showToast("DonMillson Tweaks 0.2 włączony");
+  captureCurrentId();
+
+  try{patchTypingIndicator()}catch(e){
+    try{pluginApi.logger&&pluginApi.logger.error("DonMillsonTweaks: typing patch failed",e)}catch(_){}
+  }
+
+  try{patchProfileMedia()}catch(e){
+    try{pluginApi.logger&&pluginApi.logger.error("DonMillsonTweaks: profile media patch failed",e)}catch(_){}
+  }
+
+  try{patchNickColor()}catch(e){
+    try{pluginApi.logger&&pluginApi.logger.error("DonMillsonTweaks: nick color patch failed",e)}catch(_){}
+  }
+
+  try{refreshDiscord()}catch(_){}
+  showToast("DonMillson Tweaks 0.2.1 włączony");
 }
 
 function onUnload(){
   while(unpatches.length) safeUnpatch(unpatches.pop());
-  refreshDiscord();
+  try{refreshDiscord()}catch(_){}
+  myUserId=null;
 }
 
 exports.onLoad=onLoad;
