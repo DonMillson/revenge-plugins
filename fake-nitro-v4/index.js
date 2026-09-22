@@ -340,9 +340,9 @@ function Settings() {
     contentContainerStyle: { padding: 16, paddingBottom: 50 }
   },
 
-    React.createElement(Section, { title: "DonMillson FakeNitro v7 SAFE" },
+    React.createElement(Section, { title: "DonMillson Tweaks 0.3.1" },
       React.createElement(RN.Text, { style: { color: "#aaa", lineHeight: 18 } },
-        "Wersja stabilna: banner i kolor nicku. Usunięto globalne patche Nitro powodujące crash avatara. Dekoracje będą dodawane wyłącznie przez bezpieczny renderer kompatybilny z pluginami FakeProfile."
+        "Stabilna wersja profilu oparta na sprawdzonym mechanizmie FakeProfile."
       )
     ),
 
@@ -455,7 +455,7 @@ function Settings() {
         style: { width: 170, height: 170, alignSelf: "center", marginTop: 8 }
       }) : null,
       React.createElement(RN.Text, { style: { color: "#f0b232", marginTop: 8, lineHeight: 18 } },
-        "Tryb SAFE: dekoracja z pliku pozostaje wyłączona do czasu podpięcia bezpiecznego renderera. Plugin nie modyfikuje globalnych uprawnień Nitro."
+        "W tej stabilnej wersji wybór pliku dekoracji jest już gotowy, ale samo nałożenie dekoracji na avatar jest jeszcze wyłączone, żeby plugin nie wywalał się przy starcie."
       )
     )
   );
