@@ -1,525 +1,489 @@
-(function(exports,vendetta){
+(function(exports, metro, common, api, plugin) {
 "use strict";
 
-var storage = vendetta.plugin.storage;
-var metro = vendetta.metro;
-var patcher = vendetta.patcher;
-var React = metro.common.React;
-var RN = metro.common.ReactNative;
-var unpatches = [];
-var myUserId = null;
-var CUSTOM_SKU = "donmillson-local-decoration";
-var CUSTOM_ASSET = "donmillson_custom_decoration";
+const React = common.React;
+const RN = common.ReactNative;
+const storage = plugin.storage;
 
-function toast(msg){
-  try{ vendetta.ui.toasts.showToast(String(msg)); }catch(_){}
+storage.enabled ??= true;
+storage.bannerEnabled ??= false;
+storage.bannerMedia ??= null;
+storage.nickColorEnabled ??= false;
+storage.nickColor ??= "#b96cff";
+storage.decorationEnabled ??= false;
+storage.decorationMedia ??= null;
+
+let unpatches = [];
+let myId = null;
+let userCache = new WeakMap();
+let profileCache = new WeakMap();
+
+function clearCache() {
+  userCache = new WeakMap();
+  profileCache = new WeakMap();
 }
 
-function logError(where, e){
-  try{ vendetta.logger.error("[DonMillson Tweaks] "+where, e); }catch(_){}
+function safeStore(name) {
+  try { return metro.findByStoreName?.(name) || metro.findByStoreNameLazy?.(name); }
+  catch { return null; }
 }
 
-function defaults(){
-  storage.bannerEnabled ??= false;
-  storage.bannerMedia ??= null;
-  storage.decorationEnabled ??= false;
-  storage.decorationMedia ??= null;
-  storage.nickColorEnabled ??= false;
-  storage.nickColor ??= "#b96cff";
-}
-
-function cloneObject(obj){
-  if(!obj || typeof obj!=="object") return obj;
-  try{
-    var clone = Object.create(Object.getPrototypeOf(obj));
-    Reflect.ownKeys(obj).forEach(function(k){
-      try{
-        var d = Object.getOwnPropertyDescriptor(obj,k);
-        if(d) Object.defineProperty(clone,k,d);
-      }catch(_){}
-    });
-    return clone;
-  }catch(_){
-    try{return Object.assign({},obj)}catch(__){return obj}
+function toast(message) {
+  try { api.ui?.toasts?.showToast?.(String(message)); }
+  catch {
+    try { vendetta.ui.toasts.showToast(String(message)); } catch {}
   }
 }
 
-function setValue(obj,key,value){
-  try{
-    var d = Object.getOwnPropertyDescriptor(obj,key);
-    if(!d || d.configurable){
-      Object.defineProperty(obj,key,{
-        value:value,writable:true,enumerable:d?!!d.enumerable:true,configurable:true
-      });
+function mediaUri(key) {
+  return String(storage[key]?.uri || "");
+}
+
+function mediaName(key) {
+  return String(storage[key]?.name || "Wybrany obraz");
+}
+
+function saveMedia(key, asset) {
+  const uri = asset?.fileCopyUri || asset?.uri;
+  const name = String(asset?.fileName || asset?.name || "Wybrany obraz");
+  const type = String(asset?.type || "").toLowerCase();
+
+  if (!uri) throw new Error("Nie wybrano obrazu.");
+  if (type && !type.startsWith("image/")) throw new Error("Wybierz obraz lub GIF.");
+
+  storage[key] = { uri, name, type };
+  clearCache();
+  refreshDiscord();
+}
+
+async function pickFile(key) {
+  let picker;
+  try { picker = metro.findByProps?.("pickSingle", "isCancel"); } catch {}
+  if (!picker?.pickSingle) throw new Error("Systemowy wybór plików jest niedostępny.");
+
+  try {
+    const asset = await picker.pickSingle({
+      type: picker.types?.images || "image/*",
+      mode: "import",
+      copyTo: "documentDirectory"
+    });
+    if (!asset) return false;
+    saveMedia(key, asset);
+    return true;
+  } catch (error) {
+    if (picker.isCancel?.(error)) return false;
+    throw error;
+  }
+}
+
+async function pickPhoto(key) {
+  let picker;
+  try { picker = metro.findByProps?.("launchImageLibrary"); } catch {}
+  if (!picker?.launchImageLibrary) return pickFile(key);
+
+  const result = await new Promise((resolve, reject) => {
+    let returned;
+    try {
+      returned = picker.launchImageLibrary({
+        mediaType: "photo",
+        selectionLimit: 1,
+        includeBase64: false,
+        assetRepresentationMode: "current"
+      }, resolve);
+    } catch (error) {
+      reject(error);
       return;
     }
-    if(d.writable) obj[key]=value;
-  }catch(_){
-    try{obj[key]=value}catch(__){}
-  }
-}
+    if (returned?.then) returned.then(resolve, reject);
+  });
 
-function getUserStore(){
-  try{return metro.findByStoreName("UserStore")}catch(_){return null}
-}
+  if (result?.didCancel) return false;
+  if (result?.errorCode) throw new Error(result.errorMessage || "Nie udało się otworzyć galerii.");
 
-function captureUserId(){
-  if(myUserId) return myUserId;
-  try{
-    var store = getUserStore();
-    var user = store && store.getCurrentUser && store.getCurrentUser();
-    if(user && user.id) myUserId = String(user.id);
-  }catch(e){logError("capture user id",e)}
-  return myUserId;
-}
-
-function mediaUri(key){
-  var m = storage[key];
-  if(!m) return "";
-  if(typeof m==="string") return m;
-  return String(m.fileCopyUri || m.uri || m.localUri || "");
-}
-
-function mediaName(key){
-  var m = storage[key];
-  if(!m) return "";
-  if(typeof m==="string") return "Wybrany obraz";
-  return String(m.fileName || m.name || "Wybrany obraz");
-}
-
-function saveMedia(key, asset){
-  if(!asset) return false;
-  var uri = asset.fileCopyUri || asset.localUri || asset.uri;
-  if(!uri) throw new Error("Nie udało się odczytać pliku.");
-  var type = String(asset.type || asset.mimeType || "").toLowerCase();
-  if(type && !type.startsWith("image/")) throw new Error("Wybierz obraz.");
-  storage[key] = {
-    uri:String(uri),
-    fileCopyUri: asset.fileCopyUri ? String(asset.fileCopyUri) : undefined,
-    localUri: asset.localUri ? String(asset.localUri) : undefined,
-    fileName:String(asset.fileName || asset.name || "Wybrany obraz"),
-    type:type
-  };
-  refreshDiscord();
+  const asset = result?.assets?.[0];
+  if (!asset) return false;
+  saveMedia(key, asset);
   return true;
 }
 
-async function pickFile(key){
-  var picker = null;
-  try{ picker = metro.findByProps("pickSingle","isCancel"); }catch(_){}
-  if(picker && picker.pickSingle){
-    try{
-      var asset = await picker.pickSingle({
-        type: picker.types?.images || "image/*",
-        mode:"import",
-        copyTo:"documentDirectory"
-      });
-      return saveMedia(key,asset);
-    }catch(e){
-      if(picker.isCancel && picker.isCancel(e)) return false;
-      throw e;
-    }
-  }
-
-  var docs = null;
-  try{ docs = metro.findByProps("pick","saveDocuments"); }catch(_){}
-  if(docs && docs.pick){
-    var result = await docs.pick({
-      type: docs.types?.images || ["image/*"],
-      allowVirtualFiles:true,
-      mode:"import"
-    });
-    var picked = Array.isArray(result) ? result[0] : result;
-    if(!picked) return false;
-
-    if(docs.keepLocalCopy && picked.uri){
-      try{
-        var kept = await docs.keepLocalCopy({
-          files:[{fileName:picked.name || "image.png",uri:picked.uri}],
-          destination:"documentDirectory"
-        });
-        if(kept && kept[0] && kept[0].status==="success"){
-          picked.fileCopyUri = kept[0].localUri;
-        }
-      }catch(_){}
-    }
-    return saveMedia(key,picked);
-  }
-
-  throw new Error("W tej wersji Discorda nie znaleziono systemowego wyboru plików.");
-}
-
-async function pickPhoto(key){
-  var picker = null;
-  try{ picker = metro.findByProps("launchImageLibrary"); }catch(_){}
-  if(!picker || !picker.launchImageLibrary) return pickFile(key);
-
-  var result = await new Promise(function(resolve,reject){
-    try{
-      var ret = picker.launchImageLibrary({
-        mediaType:"photo",
-        selectionLimit:1,
-        includeBase64:false,
-        assetRepresentationMode:"current"
-      },resolve);
-      if(ret && typeof ret.then==="function") ret.then(resolve,reject);
-    }catch(e){reject(e)}
-  });
-
-  if(result && result.didCancel) return false;
-  if(result && result.errorCode) throw new Error(result.errorMessage || "Nie udało się otworzyć galerii.");
-  var asset = result && result.assets && result.assets[0];
-  if(!asset) return false;
-  return saveMedia(key,asset);
-}
-
-function normalizeHex(value){
-  var s = String(value || "").trim();
-  if(!s) return null;
-  if(s[0]!=="#") s="#"+s;
-  if(/^#[0-9a-f]{3}$/i.test(s)){
-    s="#"+s[1]+s[1]+s[2]+s[2]+s[3]+s[3];
+function normalizeHex(value) {
+  let s = String(value || "").trim();
+  if (!s) return null;
+  if (!s.startsWith("#")) s = "#" + s;
+  if (/^#[0-9a-f]{3}$/i.test(s)) {
+    s = "#" + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
   }
   return /^#[0-9a-f]{6}$/i.test(s) ? s.toLowerCase() : null;
 }
 
-function hexToInt(value){
-  var h = normalizeHex(value);
-  return h ? parseInt(h.slice(1),16) : null;
-}
-
-function refreshDiscord(){
-  try{getUserStore()?.emitChange?.()}catch(_){}
-  try{metro.findByStoreName("UserProfileStore")?.emitChange?.()}catch(_){}
-  try{metro.findByStoreName("GuildMemberStore")?.emitChange?.()}catch(_){}
-  try{
-    var dispatcher = metro.findByProps("dispatch","subscribe");
-    dispatcher?.dispatch?.({type:"CURRENT_USER_UPDATE"});
-    if(myUserId) dispatcher?.dispatch?.({type:"USER_PROFILE_UPDATE",userId:myUserId});
-  }catch(_){}
-}
-
-function patchProfile(){
-  var UserStore = getUserStore();
-  var ProfileStore = null;
-  var bannerResolver = null;
-  var decorationResolver = null;
-  var decorationUtils = null;
-  var GuildMemberStore = null;
-
-  try{ProfileStore = metro.findByStoreName("UserProfileStore")}catch(_){}
-  try{bannerResolver = metro.findByProps("default","getUserBannerURL")}catch(_){}
-  try{decorationResolver = metro.findByProps("getAvatarDecorationURL","default") || metro.findByProps("getAvatarDecorationURL")}catch(_){}
-  try{decorationUtils = metro.findByProps("isAnimatedAvatarDecoration")}catch(_){}
-  try{GuildMemberStore = metro.findByStoreName("GuildMemberStore")}catch(_){}
-
-  function decorateUser(user){
-    if(!user || !storage.decorationEnabled) return user;
-    if(!myUserId || String(user.id)!==String(myUserId)) return user;
-    var uri = mediaUri("decorationMedia");
-    if(!uri) return user;
-
-    var copy = cloneObject(user);
-    var deco = {asset:CUSTOM_ASSET,skuId:CUSTOM_SKU};
-    setValue(copy,"avatarDecoration",deco);
-    setValue(copy,"avatarDecorationData",deco);
-    return copy;
-  }
-
-  function decorateProfile(profile,userId){
-    if(!profile || !storage.bannerEnabled) return profile;
-    if(myUserId && userId && String(userId)!==String(myUserId)) return profile;
-    var banner = mediaUri("bannerMedia");
-    if(!banner) return profile;
-
-    var copy = cloneObject(profile);
-    setValue(copy,"banner",banner);
-    setValue(copy,"bannerURL",banner);
-    setValue(copy,"bannerUrl",banner);
-    return copy;
-  }
-
-  if(UserStore){
-    if(typeof UserStore.getCurrentUser==="function"){
-      unpatches.push(patcher.after("getCurrentUser",UserStore,function(_args,ret){
-        try{if(ret && ret.id && !myUserId) myUserId=String(ret.id)}catch(_){}
-        return decorateUser(ret);
-      }));
+function cloneWithDescriptors(original) {
+  try {
+    const clone = Object.create(Object.getPrototypeOf(original));
+    for (const key of Reflect.ownKeys(original)) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(original, key);
+        if (desc) Object.defineProperty(clone, key, desc);
+      } catch {}
     }
-    if(typeof UserStore.getUser==="function"){
-      unpatches.push(patcher.after("getUser",UserStore,function(_args,ret){
-        return decorateUser(ret);
-      }));
-    }
-  }
-
-  if(ProfileStore){
-    if(typeof ProfileStore.getUserProfile==="function"){
-      unpatches.push(patcher.after("getUserProfile",ProfileStore,function(args,ret){
-        return decorateProfile(ret,args && args[0]);
-      }));
-    }
-    if(typeof ProfileStore.getGuildMemberProfile==="function"){
-      unpatches.push(patcher.after("getGuildMemberProfile",ProfileStore,function(args,ret){
-        return decorateProfile(ret,args && args[0]);
-      }));
-    }
-  }
-
-  if(bannerResolver && typeof bannerResolver.getUserBannerURL==="function"){
-    unpatches.push(patcher.after("getUserBannerURL",bannerResolver,function(args,ret){
-      try{
-        var user = args && args[0];
-        var banner = mediaUri("bannerMedia");
-        if(storage.bannerEnabled && banner && user && myUserId && String(user.id)===String(myUserId)) return banner;
-      }catch(_){}
-      return ret;
-    }));
-  }
-
-  if(decorationResolver && typeof decorationResolver.getAvatarDecorationURL==="function"){
-    unpatches.push(patcher.instead("getAvatarDecorationURL",decorationResolver,function(args,orig){
-      try{
-        var opts = args && args[0];
-        var deco = opts && opts.avatarDecoration;
-        var uri = mediaUri("decorationMedia");
-        if(storage.decorationEnabled && uri && deco && deco.skuId===CUSTOM_SKU) return uri;
-      }catch(_){}
-      return orig.apply(this,args);
-    }));
-  }
-
-  if(decorationUtils && typeof decorationUtils.isAnimatedAvatarDecoration==="function"){
-    unpatches.push(patcher.after("isAnimatedAvatarDecoration",decorationUtils,function(args,ret){
-      try{
-        var deco = args && args[0];
-        if(deco && deco.skuId===CUSTOM_SKU){
-          var n = mediaName("decorationMedia").toLowerCase();
-          return /\.(gif|webp|apng)$/i.test(n);
-        }
-      }catch(_){}
-      return ret;
-    }));
-  }
-
-  if(GuildMemberStore && typeof GuildMemberStore.getMember==="function"){
-    unpatches.push(patcher.after("getMember",GuildMemberStore,function(args,ret){
-      if(!ret || !storage.nickColorEnabled) return ret;
-      var userId = args && args[1];
-      var hex = normalizeHex(storage.nickColor);
-      var dec = hexToInt(storage.nickColor);
-      if(!hex || dec==null || !myUserId || String(userId)!==String(myUserId)) return ret;
-
-      var copy = cloneObject(ret);
-      setValue(copy,"colorString",hex);
-      setValue(copy,"color",dec);
-      return copy;
-    }));
+    return clone;
+  } catch {
+    try { return { ...original }; }
+    catch { return original; }
   }
 }
 
-function Card(props){
-  return React.createElement(RN.View,{
-    style:{backgroundColor:"#1f1f23",borderRadius:14,padding:14,marginBottom:14}
-  },
-    React.createElement(RN.Text,{
-      style:{color:"#fff",fontSize:18,fontWeight:"800",marginBottom:6}
-    },props.title),
-    props.sub ? React.createElement(RN.Text,{
-      style:{color:"#aaa",fontSize:13,lineHeight:18,marginBottom:8}
-    },props.sub) : null,
-    props.children
-  );
-}
+function setOwnValue(obj, key, value) {
+  try {
+    const oldDesc = Object.getOwnPropertyDescriptor(obj, key);
+    const enumerable = oldDesc ? !!oldDesc.enumerable : true;
 
-function Button(props){
-  return React.createElement(RN.Pressable,{
-    onPress:props.onPress,
-    style:{
-      backgroundColor:props.secondary ? "#36363d" : "#5865f2",
-      paddingVertical:12,
-      paddingHorizontal:14,
-      borderRadius:10,
-      marginTop:8
+    if (!oldDesc || oldDesc.configurable) {
+      Object.defineProperty(obj, key, {
+        value,
+        writable: true,
+        enumerable,
+        configurable: true
+      });
+      return;
     }
-  },
-    React.createElement(RN.Text,{
-      style:{color:"#fff",fontWeight:"800",textAlign:"center"}
-    },props.text)
-  );
+
+    if (oldDesc.writable) obj[key] = value;
+  } catch {
+    try { obj[key] = value; } catch {}
+  }
 }
 
-function Toggle(props){
-  return React.createElement(RN.Pressable,{
-    onPress:props.onPress,
-    style:{
-      backgroundColor:props.value ? "#2f8b4b" : "#34343a",
-      paddingVertical:12,
-      paddingHorizontal:14,
-      borderRadius:10,
-      marginTop:8
-    }
-  },
-    React.createElement(RN.Text,{
-      style:{color:"#fff",fontWeight:"800"}
-    },props.label+": "+(props.value?"ON":"OFF"))
-  );
+function applyProfileChanges(obj, original) {
+  if (!obj || !storage.enabled) return obj;
+
+  const banner = mediaUri("bannerMedia");
+  if (storage.bannerEnabled && banner) {
+    setOwnValue(obj, "banner", banner);
+    setOwnValue(obj, "bannerURL", banner);
+    setOwnValue(obj, "bannerUrl", banner);
+    setOwnValue(obj, "getBannerURL", () => banner);
+  }
+
+  return obj;
 }
 
-function Preview(props){
-  if(!props.uri) return null;
-  return React.createElement(RN.Image,{
-    source:{uri:props.uri},
-    resizeMode:props.banner ? "cover" : "contain",
-    style:props.banner
-      ? {width:"100%",height:120,borderRadius:10,backgroundColor:"#111",marginTop:10}
-      : {width:170,height:170,alignSelf:"center",backgroundColor:"transparent",marginTop:10}
-  });
+function cloneObject(original, type) {
+  if (!original || !storage.enabled) return original;
+
+  const cache = type === "profile" ? profileCache : userCache;
+  try {
+    const cached = cache.get(original);
+    if (cached) return cached;
+  } catch {}
+
+  const fake = applyProfileChanges(cloneWithDescriptors(original), original);
+
+  try { cache.set(original, fake); } catch {}
+  return fake;
 }
 
-function Settings(){
-  var st = React.useReducer(function(x){return x+1},0);
-  var refresh = st[1];
+function cloneUser(user) {
+  if (!user || !storage.enabled) return user;
+  try {
+    if (myId && String(user.id) !== String(myId)) return user;
+  } catch {}
+  return cloneObject(user, "user");
+}
 
-  async function choose(key,mode){
-    try{
-      var ok = mode==="photo" ? await pickPhoto(key) : await pickFile(key);
-      if(ok){
-        refresh();
-        toast("Obraz ustawiony.");
+function cloneProfile(profile, userId) {
+  if (!profile || !storage.enabled) return profile;
+  try {
+    if (myId && userId && String(userId) !== String(myId)) return profile;
+  } catch {}
+  return cloneObject(profile, "profile");
+}
+
+function patchStores() {
+  const UserStore = safeStore("UserStore") || metro.findByProps?.("getCurrentUser", "getUser");
+
+  if (UserStore) {
+    try { myId = UserStore.getCurrentUser?.()?.id || myId; } catch {}
+
+    try {
+      if (UserStore.getCurrentUser) {
+        unpatches.push(api.patcher.instead("getCurrentUser", UserStore, (args, original) => {
+          const user = original(...args);
+          try { myId = user?.id || myId; } catch {}
+          return cloneUser(user);
+        }));
       }
-    }catch(e){
-      logError("picker",e);
-      toast(e && e.message ? e.message : "Nie udało się wybrać obrazu.");
+    } catch {}
+
+    try {
+      if (UserStore.getUser) {
+        unpatches.push(api.patcher.instead("getUser", UserStore, (args, original) => {
+          const wantedId = args?.[0];
+          if (wantedId && myId && String(wantedId) !== String(myId)) return original(...args);
+          if (wantedId && !myId) return original(...args);
+          return cloneUser(original(...args));
+        }));
+      }
+    } catch {}
+  }
+
+  const ProfileStore = safeStore("UserProfileStore") || metro.findByProps?.("getUserProfile", "getGuildMemberProfile");
+
+  if (ProfileStore) {
+    try {
+      if (ProfileStore.getUserProfile) {
+        unpatches.push(api.patcher.instead("getUserProfile", ProfileStore, (args, original) => {
+          const userId = args?.[0];
+          if (userId && myId && String(userId) !== String(myId)) return original(...args);
+          if (userId && !myId) return original(...args);
+          return cloneProfile(original(...args), userId);
+        }));
+      }
+    } catch {}
+
+    try {
+      if (ProfileStore.getGuildMemberProfile) {
+        unpatches.push(api.patcher.instead("getGuildMemberProfile", ProfileStore, (args, original) => {
+          const userId = args?.[0];
+          if (userId && myId && String(userId) !== String(myId)) return original(...args);
+          if (userId && !myId) return original(...args);
+          return cloneProfile(original(...args), userId);
+        }));
+      }
+    } catch {}
+  }
+
+  const GuildMemberStore = safeStore("GuildMemberStore");
+  if (GuildMemberStore) {
+    try {
+      if (GuildMemberStore.getMember) {
+        unpatches.push(api.patcher.after("getMember", GuildMemberStore, (args, member) => {
+          if (!member || !storage.nickColorEnabled) return member;
+          const userId = args?.[1];
+          if (!myId || String(userId) !== String(myId)) return member;
+
+          const hex = normalizeHex(storage.nickColor);
+          if (!hex) return member;
+
+          const fake = cloneWithDescriptors(member);
+          setOwnValue(fake, "colorString", hex);
+          setOwnValue(fake, "color", parseInt(hex.slice(1), 16));
+          return fake;
+        }));
+      }
+    } catch {}
+  }
+}
+
+function refreshDiscord() {
+  clearCache();
+
+  try { (safeStore("UserStore") || metro.findByProps?.("getCurrentUser", "getUser"))?.emitChange?.(); } catch {}
+  try { (safeStore("UserProfileStore") || metro.findByProps?.("getUserProfile", "getGuildMemberProfile"))?.emitChange?.(); } catch {}
+  try { safeStore("GuildMemberStore")?.emitChange?.(); } catch {}
+
+  try {
+    const Dispatcher = metro.findByProps?.("dispatch", "subscribe");
+    Dispatcher?.dispatch?.({ type: "CURRENT_USER_UPDATE" });
+    if (myId) Dispatcher?.dispatch?.({ type: "USER_PROFILE_UPDATE", userId: myId });
+  } catch {}
+}
+
+function Settings() {
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  const Toggle = ({ label, sub, value, onPress }) => React.createElement(RN.Pressable, {
+    onPress,
+    style: {
+      backgroundColor: value ? "#2f7d46" : "#2b2b2b",
+      padding: 12,
+      borderRadius: 10,
+      marginBottom: 8
+    }
+  },
+    React.createElement(RN.Text, { style: { color: "#fff", fontSize: 15, fontWeight: "800" } }, value ? label + ": ON" : label + ": OFF"),
+    sub ? React.createElement(RN.Text, { style: { color: "#aaa", marginTop: 3, fontSize: 12 } }, sub) : null
+  );
+
+  const Button = ({ text, onPress, secondary }) => React.createElement(RN.Pressable, {
+    onPress,
+    style: {
+      backgroundColor: secondary ? "#35373c" : "#5865f2",
+      padding: 11,
+      borderRadius: 8,
+      marginBottom: 8
+    }
+  }, React.createElement(RN.Text, {
+    style: { color: "#fff", textAlign: "center", fontWeight: "800" }
+  }, text));
+
+  const Section = ({ title, children }) => React.createElement(RN.View, {
+    style: { backgroundColor: "#1f1f23", padding: 14, borderRadius: 12, marginBottom: 14 }
+  },
+    React.createElement(RN.Text, { style: { color: "#fff", fontSize: 18, fontWeight: "900", marginBottom: 10 } }, title),
+    children
+  );
+
+  async function choose(key, picker) {
+    try {
+      if (await picker(key)) forceUpdate();
+    } catch (error) {
+      try { RN.Alert.alert("DonMillson Tweaks", error?.message || "Nie udało się wybrać obrazu."); }
+      catch { toast(error?.message || "Nie udało się wybrać obrazu."); }
     }
   }
 
-  function clearMedia(key){
-    storage[key]=null;
-    refreshDiscord();
-    refresh();
-  }
+  const banner = mediaUri("bannerMedia");
+  const decoration = mediaUri("decorationMedia");
 
-  function setColor(hex){
-    storage.nickColor=hex;
-    storage.nickColorEnabled=true;
-    refreshDiscord();
-    refresh();
-  }
-
-  var banner = mediaUri("bannerMedia");
-  var decoration = mediaUri("decorationMedia");
-
-  return React.createElement(RN.ScrollView,{
-    style:{flex:1},
-    contentContainerStyle:{padding:16,paddingBottom:60}
+  return React.createElement(RN.ScrollView, {
+    style: { flex: 1 },
+    contentContainerStyle: { padding: 16, paddingBottom: 50 }
   },
-    React.createElement(Card,{
-      title:"DonMillson Tweaks 0.3",
-      sub:"Profil działa lokalnie w Revenge. Banner i dekorację wybierasz bez URL."
-    }),
 
-    React.createElement(Card,{
-      title:"Banner profilu",
-      sub:banner ? mediaName("bannerMedia") : "Nie wybrano bannera"
-    },
-      React.createElement(Toggle,{
-        label:"Banner",
-        value:!!storage.bannerEnabled,
-        onPress:function(){storage.bannerEnabled=!storage.bannerEnabled;refreshDiscord();refresh()}
-      }),
-      React.createElement(Button,{text:"Wybierz z Galerii",onPress:function(){choose("bannerMedia","photo")}}),
-      React.createElement(Button,{text:"Wybierz z Plików",secondary:true,onPress:function(){choose("bannerMedia","file")}}),
-      banner ? React.createElement(Button,{text:"Usuń banner",secondary:true,onPress:function(){clearMedia("bannerMedia")}}) : null,
-      React.createElement(Preview,{uri:banner,banner:true})
+    React.createElement(Section, { title: "DonMillson Tweaks 0.3.1" },
+      React.createElement(RN.Text, { style: { color: "#aaa", lineHeight: 18 } },
+        "Stabilna wersja profilu oparta na sprawdzonym mechanizmie FakeProfile."
+      )
     ),
 
-    React.createElement(Card,{
-      title:"Dekoracja avatara",
-      sub:decoration ? mediaName("decorationMedia") : "Najlepiej PNG/APNG/WEBP z przezroczystym tłem"
-    },
-      React.createElement(Toggle,{
-        label:"Dekoracja",
-        value:!!storage.decorationEnabled,
-        onPress:function(){storage.decorationEnabled=!storage.decorationEnabled;refreshDiscord();refresh()}
-      }),
-      React.createElement(Button,{text:"Wybierz z Galerii",onPress:function(){choose("decorationMedia","photo")}}),
-      React.createElement(Button,{text:"Wybierz z Plików",secondary:true,onPress:function(){choose("decorationMedia","file")}}),
-      decoration ? React.createElement(Button,{text:"Usuń dekorację",secondary:true,onPress:function(){clearMedia("decorationMedia")}}) : null,
-      React.createElement(Preview,{uri:decoration,banner:false})
-    ),
-
-    React.createElement(Card,{
-      title:"Kolor nicku",
-      sub:"Lokalny kolor nicku w Revenge."
-    },
-      React.createElement(Toggle,{
-        label:"Kolor nicku",
-        value:!!storage.nickColorEnabled,
-        onPress:function(){storage.nickColorEnabled=!storage.nickColorEnabled;refreshDiscord();refresh()}
-      }),
-      React.createElement(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:8,marginTop:8}},
-        ["#b96cff","#ff4fc3","#4da3ff","#57f287","#ed4245","#ff9f43"].map(function(hex){
-          return React.createElement(RN.Pressable,{
-            key:hex,
-            onPress:function(){setColor(hex)},
-            style:{
-              width:44,height:44,borderRadius:22,backgroundColor:hex,
-              borderWidth:normalizeHex(storage.nickColor)===hex?3:0,borderColor:"#fff"
-            }
-          });
-        })
-      ),
-      React.createElement(RN.TextInput,{
-        value:String(storage.nickColor||""),
-        placeholder:"#b96cff",
-        placeholderTextColor:"#777",
-        autoCapitalize:"none",
-        autoCorrect:false,
-        onChangeText:function(v){storage.nickColor=v;refresh()},
-        style:{
-          color:"#fff",backgroundColor:"#2b2b30",borderRadius:10,
-          paddingHorizontal:12,paddingVertical:10,marginTop:12
+    React.createElement(Section, { title: "Banner profilu" },
+      React.createElement(Toggle, {
+        label: "Banner",
+        value: !!storage.bannerEnabled,
+        onPress: () => {
+          storage.bannerEnabled = !storage.bannerEnabled;
+          clearCache();
+          refreshDiscord();
+          forceUpdate();
         }
       }),
-      React.createElement(Button,{
-        text:"Zastosuj kolor HEX",
-        onPress:function(){
-          var h=normalizeHex(storage.nickColor);
-          if(!h){toast("Nieprawidłowy kolor HEX.");return}
-          setColor(h);
-          toast("Kolor nicku zastosowany.");
+      React.createElement(Button, { text: "Wybierz z Galerii", onPress: () => choose("bannerMedia", pickPhoto) }),
+      React.createElement(Button, { text: "Wybierz z Plików", secondary: true, onPress: () => choose("bannerMedia", pickFile) }),
+      banner ? React.createElement(Button, {
+        text: "Usuń banner",
+        secondary: true,
+        onPress: () => {
+          storage.bannerMedia = null;
+          clearCache();
+          refreshDiscord();
+          forceUpdate();
+        }
+      }) : null,
+      banner ? React.createElement(RN.Image, {
+        source: { uri: banner },
+        resizeMode: "cover",
+        style: { width: "100%", height: 120, borderRadius: 10, backgroundColor: "#111", marginTop: 8 }
+      }) : null
+    ),
+
+    React.createElement(Section, { title: "Kolor nicku" },
+      React.createElement(Toggle, {
+        label: "Kolor nicku",
+        value: !!storage.nickColorEnabled,
+        onPress: () => {
+          storage.nickColorEnabled = !storage.nickColorEnabled;
+          refreshDiscord();
+          forceUpdate();
+        }
+      }),
+      React.createElement(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 8 } },
+        ["#b96cff","#ff4fc3","#4da3ff","#57f287","#ed4245","#ff9f43"].map(hex =>
+          React.createElement(RN.Pressable, {
+            key: hex,
+            onPress: () => {
+              storage.nickColor = hex;
+              storage.nickColorEnabled = true;
+              refreshDiscord();
+              forceUpdate();
+            },
+            style: {
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: hex,
+              borderWidth: normalizeHex(storage.nickColor) === hex ? 3 : 0,
+              borderColor: "#fff"
+            }
+          })
+        )
+      ),
+      React.createElement(RN.TextInput, {
+        value: String(storage.nickColor || ""),
+        placeholder: "#b96cff",
+        placeholderTextColor: "#777",
+        autoCapitalize: "none",
+        autoCorrect: false,
+        onChangeText: text => {
+          storage.nickColor = text;
+          forceUpdate();
+        },
+        style: {
+          color: "#fff",
+          backgroundColor: "#2b2b30",
+          padding: 11,
+          borderRadius: 9
+        }
+      }),
+      React.createElement(Button, {
+        text: "Zastosuj HEX",
+        onPress: () => {
+          const hex = normalizeHex(storage.nickColor);
+          if (!hex) return toast("Nieprawidłowy kolor HEX.");
+          storage.nickColor = hex;
+          storage.nickColorEnabled = true;
+          refreshDiscord();
+          forceUpdate();
+          toast("Kolor zastosowany.");
         }
       })
     ),
 
-    React.createElement(Card,{
-      title:"Tekst pisania",
-      sub:"Moduł „nawija / papla / szczeka” dołożę w następnym kroku po potwierdzeniu, że profil działa bez wyłączania pluginu."
-    })
+    React.createElement(Section, { title: "Dekoracja avatara" },
+      React.createElement(Toggle, {
+        label: "Dekoracja",
+        value: !!storage.decorationEnabled,
+        onPress: () => {
+          storage.decorationEnabled = !storage.decorationEnabled;
+          forceUpdate();
+        }
+      }),
+      React.createElement(Button, { text: "Wybierz dekorację z Galerii", onPress: () => choose("decorationMedia", pickPhoto) }),
+      React.createElement(Button, { text: "Wybierz dekorację z Plików", secondary: true, onPress: () => choose("decorationMedia", pickFile) }),
+      decoration ? React.createElement(RN.Image, {
+        source: { uri: decoration },
+        resizeMode: "contain",
+        style: { width: 170, height: 170, alignSelf: "center", marginTop: 8 }
+      }) : null,
+      React.createElement(RN.Text, { style: { color: "#f0b232", marginTop: 8, lineHeight: 18 } },
+        "W tej stabilnej wersji wybór pliku dekoracji jest już gotowy, ale samo nałożenie dekoracji na avatar jest jeszcze wyłączone, żeby plugin nie wywalał się przy starcie."
+      )
+    )
   );
 }
 
-function onLoad(){
-  defaults();
-  captureUserId();
+const index = {
+  onLoad() {
+    try { patchStores(); }
+    catch (e) {
+      try { api.logger?.error?.("DonMillson Tweaks patchStores", e); } catch {}
+    }
+  },
+  onUnload() {
+    for (const unpatch of unpatches) try { unpatch?.(); } catch {}
+    unpatches = [];
+    clearCache();
+    refreshDiscord();
+  },
+  settings: Settings
+};
 
-  try{patchProfile()}catch(e){logError("profile patch",e)}
-
-  try{refreshDiscord()}catch(_){}
-  toast("DonMillson Tweaks 0.3 włączony");
-}
-
-function onUnload(){
-  while(unpatches.length){
-    try{var fn=unpatches.pop(); if(fn) fn()}catch(_){}
-  }
-  try{refreshDiscord()}catch(_){}
-  myUserId=null;
-}
-
-exports.onLoad=onLoad;
-exports.onUnload=onUnload;
-exports.settings=Settings;
+exports.default = index;
+Object.defineProperty(exports, "__esModule", { value: true });
 return exports;
-})({},vendetta);
+})(
+  {},
+  typeof bunny !== "undefined" && bunny.metro ? bunny.metro : vendetta.metro,
+  typeof bunny !== "undefined" && bunny.metro?.common ? bunny.metro.common : vendetta.metro.common,
+  typeof bunny !== "undefined" && bunny.api?.patcher ? bunny.api : vendetta,
+  vendetta.plugin
+);
