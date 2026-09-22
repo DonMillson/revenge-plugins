@@ -11,7 +11,7 @@ storage.bannerMedia ??= null;
 storage.nickColorEnabled ??= false;
 storage.nickColor ??= "#b96cff";
 storage.decorationEnabled ??= false;
-storage.decorationMedia ??= null;\nstorage.decorUrl ??= "";\nstorage.syncStatus ??= "";
+storage.decorationMedia ??= null;
 
 let unpatches = [];
 let myId = null;
@@ -288,7 +288,7 @@ function refreshDiscord() {
   } catch {}
 }
 
-function applyFakeNitroCaps() {\n  let n=0;\n  try {\n    const caps=metro.findByProps?.("canUseCollectibles");\n    for (const key of ["canUseCollectibles","canUsePremiumProfileCustomization"]) {\n      if (!caps || typeof caps[key] !== "function") continue;\n      try { unpatches.push(api.patcher.instead(key,caps,()=>true)); n++; } catch {}\n    }\n  } catch {}\n  storage.syncStatus="FakeNitro patche: "+n;\n}\n\nfunction syncMarker(){ return storage.decorUrl ? "[FNDEC:"+encodeURIComponent(storage.decorUrl)+"]" : ""; }\n\nfunction Settings() {
+function Settings() {
   const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
   const Toggle = ({ label, sub, value, onPress }) => React.createElement(RN.Pressable, {
@@ -340,9 +340,9 @@ function applyFakeNitroCaps() {\n  let n=0;\n  try {\n    const caps=metro.findB
     contentContainerStyle: { padding: 16, paddingBottom: 50 }
   },
 
-    React.createElement(Section, { title: "DonMillson FakeNitro + Tweaks v6" },
+    React.createElement(Section, { title: "DonMillson FakeNitro v7 SAFE" },
       React.createElement(RN.Text, { style: { color: "#aaa", lineHeight: 18 } },
-        "Stabilna wersja profilu oparta na sprawdzonym mechanizmie FakeProfile."
+        "Wersja stabilna: banner i kolor nicku. Usunięto globalne patche Nitro powodujące crash avatara. Dekoracje będą dodawane wyłącznie przez bezpieczny renderer kompatybilny z pluginami FakeProfile."
       )
     ),
 
@@ -438,7 +438,7 @@ function applyFakeNitroCaps() {\n  let n=0;\n  try {\n    const caps=metro.findB
       })
     ),
 
-    React.createElement(Section, { title: "FakeNitro Shared" },\n      React.createElement(RN.Text, { style: { color: "#aaa", lineHeight: 18, marginBottom: 8 } }, "URL dekoracji dla kompatybilnych klientów Revenge. Zwykły Discord nie renderuje tego znacznika."),\n      React.createElement(RN.TextInput, { value: String(storage.decorUrl || ""), placeholder: "https://.../decoration.png", placeholderTextColor: "#777", autoCapitalize: "none", autoCorrect: false, onChangeText: text => { storage.decorUrl=text; forceUpdate(); }, style: { color:"#fff", backgroundColor:"#2b2b30", padding:11, borderRadius:9, marginBottom:8 } }),\n      React.createElement(RN.Text, { selectable:true, style:{color:"#ddd",fontSize:12,marginBottom:8} }, "Znacznik do bio:\\n"+syncMarker()),\n      React.createElement(Button, { text:"Odśwież FakeNitro", onPress:()=>{ applyFakeNitroCaps(); forceUpdate(); } }),\n      React.createElement(RN.Text, { style:{color:"#aaa",fontSize:12} }, String(storage.syncStatus||""))\n    ),\n\n    React.createElement(Section, { title: "Dekoracja avatara" },
+    React.createElement(Section, { title: "Dekoracja avatara" },
       React.createElement(Toggle, {
         label: "Dekoracja",
         value: !!storage.decorationEnabled,
@@ -455,7 +455,7 @@ function applyFakeNitroCaps() {\n  let n=0;\n  try {\n    const caps=metro.findB
         style: { width: 170, height: 170, alignSelf: "center", marginTop: 8 }
       }) : null,
       React.createElement(RN.Text, { style: { color: "#f0b232", marginTop: 8, lineHeight: 18 } },
-        "W tej stabilnej wersji wybór pliku dekoracji jest już gotowy, ale samo nałożenie dekoracji na avatar jest jeszcze wyłączone, żeby plugin nie wywalał się przy starcie."
+        "Tryb SAFE: dekoracja z pliku pozostaje wyłączona do czasu podpięcia bezpiecznego renderera. Plugin nie modyfikuje globalnych uprawnień Nitro."
       )
     )
   );
@@ -463,7 +463,7 @@ function applyFakeNitroCaps() {\n  let n=0;\n  try {\n    const caps=metro.findB
 
 const index = {
   onLoad() {
-    try { patchStores(); applyFakeNitroCaps(); }
+    try { patchStores(); }
     catch (e) {
       try { api.logger?.error?.("DonMillson Tweaks patchStores", e); } catch {}
     }
