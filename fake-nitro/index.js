@@ -3,38 +3,49 @@
 const React=common.React, RN=common.ReactNative, storage=plugin.storage;
 storage.diagReport ??= "Jeszcze nie wykonano skanu.";
 
+function safeStore(n){try{return metro.findByStoreName?.(n)||metro.findByStoreNameLazy?.(n)}catch{return null}}
+function safeProps(){try{return metro.findByProps?.apply(null,arguments)}catch{return null}}
+
 function scan(){
- const hits=[],seen={};
- function add(v){v=String(v);if(!seen[v]){seen[v]=1;hits.push(v)}}
- const probes=[
-  ["AvatarDecorationStore"],["CollectiblesStore"],["PremiumStore"],["UserStore"],
-  ["canUseAvatarDecorations"],["canUseAvatarDecoration"],["canUseCollectibles"],
-  ["getAvatarDecoration"],["getCollectibles"],["getEntitlements"],["getSku"]
- ];
- for(const p of probes){
+ const out=[],seen={};
+ const add=s=>{s=String(s);if(!seen[s]){seen[s]=1;out.push(s)}};
+ const stores=["AvatarDecorationStore","CollectiblesStore","PremiumStore","UserStore","UserProfileStore"];
+ for(const n of stores){
   try{
-   let o=null;
-   if(p[0].endsWith("Store")) o=metro.findByStoreName?.(p[0]);
-   else o=metro.findByProps?.(p[0]);
-   if(o){
-    let keys=[];try{keys=Object.keys(o)}catch{}
-    add(p[0]+" => "+keys.filter(k=>/avatar|decorat|collect|nitro|premium|effect|entitl|sku|use/i.test(k)).slice(0,80).join(", "));
-   }
-  }catch(e){add(p[0]+" ERROR "+String(e))}
+   const o=safeStore(n);
+   if(!o)continue;
+   const keys=Object.keys(o).filter(k=>/avatar|decorat|collect|nitro|premium|effect|entitl|sku|use/i.test(k));
+   add(n+" => "+keys.join(", "));
+  }catch(e){add(n+" ERROR "+String(e))}
  }
- storage.diagReport=hits.length?hits.join("\n"):"Brak trafień w bezpiecznym skanie.";
+ const props=["canUseAvatarDecorations","canUseAvatarDecoration","canUseCollectibles","getAvatarDecoration","getCollectibles","getEntitlements","getSku"];
+ for(const n of props){
+  try{
+   const o=safeProps(n); if(!o)continue;
+   const keys=Object.keys(o).filter(k=>/avatar|decorat|collect|nitro|premium|effect|entitl|sku|use/i.test(k));
+   add(n+" => "+keys.join(", "));
+  }catch(e){add(n+" ERROR "+String(e))}
+ }
+ storage.diagReport=out.length?out.join("\n"):"Brak trafień.";
  return storage.diagReport;
 }
+
 function Settings(){
- const state=React.useState(0), force=state[1];
- const report=String(storage.diagReport||"");
- const press=()=>{scan();force(x=>x+1)};
- return React.createElement(RN.ScrollView,{contentContainerStyle:{padding:16}},
-  React.createElement(RN.Text,{style:{fontSize:22,fontWeight:"700",color:"#fff",marginBottom:12}},"FakeNitro Diagnostics"),
-  React.createElement(RN.Text,{style:{color:"#ccc",marginBottom:16,lineHeight:20}},"Otwórz wcześniej ekran dekoracji, wróć tutaj i naciśnij SKANUJ."),
-  React.createElement(RN.Pressable,{onPress:press,style:{padding:14,borderRadius:10,backgroundColor:"#5865F2",marginBottom:16}},
-   React.createElement(RN.Text,{style:{color:"#fff",fontWeight:"700",textAlign:"center"}},"SKANUJ")),
-  React.createElement(RN.Text,{selectable:true,style:{color:"#ddd",fontSize:12,lineHeight:17}},String(storage.diagReport||report))
+ const pair=React.useReducer(x=>x+1,0), forceUpdate=pair[1];
+ const Button=({text,onPress})=>React.createElement(RN.Pressable,{
+  onPress,
+  style:{backgroundColor:"#5865f2",padding:12,borderRadius:8,marginBottom:12}
+ },React.createElement(RN.Text,{style:{color:"#fff",textAlign:"center",fontWeight:"800"}},text));
+
+ return React.createElement(RN.ScrollView,{
+  style:{flex:1},contentContainerStyle:{padding:16,paddingBottom:50}
+ },
+  React.createElement(RN.View,{style:{backgroundColor:"#1f1f23",padding:14,borderRadius:12}},
+   React.createElement(RN.Text,{style:{color:"#fff",fontSize:18,fontWeight:"900",marginBottom:10}},"FakeNitro Diagnostics 3"),
+   React.createElement(RN.Text,{style:{color:"#aaa",lineHeight:18,marginBottom:12}},"Najpierw otwórz ekran dekoracji awatara. Potem wróć tutaj i uruchom skan."),
+   React.createElement(Button,{text:"SKANUJ",onPress:()=>{scan();forceUpdate()}}),
+   React.createElement(RN.Text,{selectable:true,style:{color:"#ddd",fontSize:12,lineHeight:17}},String(storage.diagReport||""))
+  )
  );
 }
 function onLoad(){try{scan()}catch(e){storage.diagReport="LOAD ERROR: "+String(e)}}
