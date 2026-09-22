@@ -1,1 +1,1 @@
-{"name":"FakeNitro Diagnostics 2","description":"Safe diagnostic build for Revenge Classic avatar decorations and Nitro modules.","authors":[{"name":"DonMillson","id":"0"}],"main":"index.js","vendetta":{"icon":"img_nitro_emojis"},"hash":"8e4d6e07882f186284ce4ba62c46b6a7e0c78a8f"}
+{"name":"FakeNitro Diagnostics 3","description":"Diagnostic build using the same settings UI pattern as DonMillson Tweaks.","authors":[{"name":"DonMillson","id":"0"}],"main":"index.js","vendetta":{"icon":"img_nitro_emojis"},"hash":"6943f5e933a36b09fc60e7c62c42d84ab87e3940"}
