@@ -1,23 +1,24 @@
 # DonMillson Revenge Plugins
 
-Repozytorium pluginów do Revenge Classic.
-
-## DonMillson Tweaks
+## DonMillson Tweaks 0.2
 
 Funkcje:
-- zmiana tekstu wskaźnika pisania (np. „papla…”, „szczeka…” lub własny tekst),
-- lokalny banner profilu,
-- lokalna dekoracja avatara.
+- własny tekst wskaźnika pisania: **nawija / papla / szczeka / własny**,
+- własny kolor nicku (preset lub HEX),
+- banner wybierany bezpośrednio z **Galerii / Plików**,
+- dekoracja avatara wybierana z **Galerii / Plików**,
+- podgląd wybranego bannera/dekoracji.
 
-## Instalacja w Revenge Classic
+> Ważne: te zmiany są client-side. Widzi je aplikacja Revenge, w której plugin jest zainstalowany. Nie nadają Nitro i nie zmieniają profilu widocznego w zwykłym Discordzie u innych osób.
 
-W **Settings → Plugins → Install a plugin** wklej ADRES FOLDERU:
+## Instalacja / ponowna instalacja
 
-`https://cdn.jsdelivr.net/gh/DonMillson/revenge-plugins@main/donmillson-tweaks/`
+Najpierw usuń poprzednią wersję **DonMillson Tweaks** z Revenge.
 
-**Nie wklejaj adresu kończącego się na `manifest.json`.**
-Revenge Classic sam dopisuje `manifest.json` oraz nazwę pliku JS.
+Następnie w **Settings → Plugins → Install a plugin** wklej adres folderu:
 
-Jeżeli pojawi się ostrzeżenie o „unproxied external source”, wybierz **Continue** — repozytorium jest Twoje i plugin jest ładowany bezpośrednio z niego.
+`https://raw.githubusercontent.com/DonMillson/revenge-plugins/main/donmillson-tweaks/`
 
-Banner i dekoracja są client-side — widoczne lokalnie w zmodyfikowanym kliencie, nie nadają kontu Nitro na serwerach Discorda.
+Revenge sam pobierze z tego folderu `manifest.json` i `index.js`.
+
+Jeżeli pojawi się ostrzeżenie o zewnętrznym źródle, wybierz **Continue**.
