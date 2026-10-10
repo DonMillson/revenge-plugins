@@ -22,3 +22,15 @@ Następnie w **Settings → Plugins → Install a plugin** wklej adres folderu:
 Revenge sam pobierze z tego folderu `manifest.json` i `index.js`.
 
 Jeżeli pojawi się ostrzeżenie o zewnętrznym źródle, wybierz **Continue**.
+
+## SG Server Backgrounds — wspólne tło serwera
+
+Plugin beta dla Revenge Classic na Androidzie. Właściciel publikuje grafikę w `#tlo-serwera`; widzą ją osoby z zainstalowanym pluginem.
+
+Adres do instalacji w Plugins:
+
+```text
+https://raw.githubusercontent.com/DonMillson/revenge-plugins/main/sg-server-backgrounds/
+```
+
+[Instrukcja i status wersji beta](sg-server-backgrounds/README.md).

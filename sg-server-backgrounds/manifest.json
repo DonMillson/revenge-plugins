@@ -1,0 +1,15 @@
+{
+  "name": "SG Server Backgrounds",
+  "description": "Wspólne tło za wiadomościami, publikowane przez właściciela w #tlo-serwera. Revenge Classic; wersja beta.",
+  "authors": [
+    {
+      "name": "DonMillson"
+    }
+  ],
+  "main": "index.js",
+  "version": "0.1.0-beta.1",
+  "hash": "7dad255a239cd6fffcfbf903b326427eb9fab2bb431a6ab57dc2e49a784a938d",
+  "vendetta": {
+    "icon": "ImageIcon"
+  }
+}
