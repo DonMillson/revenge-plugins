@@ -1,44 +1,11 @@
-# Implementacja i zgodność
+# SG Server Backgrounds 0.2.0-beta.1 — By DonMillson
 
-## Punkt odniesienia
+Native gallery: metro.findByProps("launchImageLibrary"), callback/Promise, includeBase64. Native file picker: pickSingle/isCancel, import + documentDirectory; use fileCopyUri. Local preview via React Native Image. Assets exist only in React state and are not persisted as base64.
 
-API odczytano 10 października 2026 z repozytorium Revenge Classic, commit `1b1d297416594087769987908e5fc09af36b7e6e`:
+Settings publication uses authenticated HTTPS PUT (JSON base64 or native FormData). Successful responses are validated before updating the shared cache. Members perform public GET by guild ID every 30 seconds while active; 15 second minimum poll interval, coalesced requests, rate-limit backoff, persisted validated last configuration, generation and per-guild epochs to discard late/obsolete responses. DELETE publishes enabled:false.
 
-- [Loader pluginów kompatybilnych z Vendetta](https://github.com/revenge-mod/revenge-bundle/blob/1b1d297416594087769987908e5fc09af36b7e6e/src/core/vendetta/plugins.ts)
-- [API udostępniane pluginom](https://github.com/revenge-mod/revenge-bundle/blob/1b1d297416594087769987908e5fc09af36b7e6e/src/core/vendetta/api.tsx)
-- [Mechanizm tła w Revenge Classic](https://github.com/revenge-mod/revenge-bundle/blob/1b1d297416594087769987908e5fc09af36b7e6e/src/lib/addons/themes/colors/patches/background.tsx)
-- [Revenge Manager](https://github.com/revenge-mod/revenge-manager)
+Service origin is fixed in config.json. Manifest schema: 1, guildId, revision (32 hex), enabled, updatedAt; enabled assets include assetPath (/assets/guildId/revision), fileName, mimeType, size, width, height, dim, blur. Only PNG/JPEG/WEBP, 10 MiB, 4096 px per side. The service authenticates X-Owner-Key by SHA-256 secret, checks bytes, uses conditional R2 publication, retains three revisions. The key grants write access to this service; server-side Discord ownership is not independently verified. Native UI checks GuildStore owner against UserStore before every publish.
 
-Publiczny projekt [bleelblep/revengeplugins](https://github.com/bleelblep/revengeplugins/blob/d9a17057a2fe98a8b0fd001ca504248e3641af76/plugins/purge-my-messages/src/lib/api.ts) potwierdza obecne wyszukiwanie natywnego modułu HTTP przez `getAPIBaseURL` i zwracanie danych w `response.body`. Wykorzystano informacje o API, bez kopiowania tamtejszego kodu.
+No Discord HTTP message API, tokens, message scraping or channel discovery. SelectedChannelStore, ChannelStore, GuildStore and UserStore supply only local context. Message view patch locates MessagesConnected or Messages render, wraps the original tree with image and dim layers, clones limited native surfaces to transparent, and excludes DMs. Frozen elements/stores remain untouched. Error boundary and image error preserve original messages. Unload removes patches, dispatcher/AppState listeners, timers and aborts native requests.
 
-## Warstwa grafiki
-
-Patching obejmuje funkcję `render` komponentu `MessagesConnected` (alternatywnie `Messages`). Obraz znajduje się w warstwie React Native pod drzewem wiadomości. Inline style kontenera korzenia i kontenera `HACK_fixModalInteraction` są kopiowane z przezroczystym tłem. Nie są modyfikowane globalne tokeny koloru, pliki Revenge, obiekty Store ani oryginalne elementy Reacta. Komponenty mogą jednak różnić się między wersjami Discorda — test Node z atrapami nie potwierdza faktycznego rysowania przez natywną listę Androida.
-
-Bezpieczna granica błędów przywraca pierwotną listę wiadomości, jeśli komponent dodatku rzuci wyjątek. Brak obsługi aktualnego widoku powoduje komunikat w ustawieniach, zamiast błędu przy inicjalizacji aplikacji.
-
-## Konfiguracja wspólna
-
-Tapeta jest odczytywana z ostatnich 100 wiadomości zwykłego kanału tekstowego o jednej, jednoznacznej nazwie. Przyjmowane są wyłącznie wiadomości bieżącego właściciela wskazanego przez `GuildStore`, niezwiązane z botem lub webhookiem. Grafika musi być załącznikiem PNG/JPG/WEBP z domeny CDN Discorda. Plugin nie przyjmuje zdalnego JavaScriptu ani JSON-a do wykonania z tego kanału.
-
-Do HTTP używany jest moduł już obecny w kliencie Discorda. W kodzie nie ma pozyskiwania tokenu, serwera zbierającego dane ani operacji wysyłania, edycji czy usuwania wiadomości. Właściciel publikuje obraz ręcznie, za pomocą zwykłego interfejsu Discorda.
-
-Wersja 0.1.0-beta.3 scala dostępne listy kanałów serwera, obsługuje kolekcje Map i sięga do globalnej listy, gdy lista serwera nie zawiera kanału konfiguracji. Pierwsza pusta odpowiedź nie zatrzymuje szukania. Dowolny podpis obrazu właściciela jest przyjmowany; parametry są interpretowane wyłącznie w poleceniu TLO. Inicjalizacja brakujących modułów jest ponawiana przez ograniczony czas oraz po ręcznym odświeżeniu.
-
-## Diagnostyka
-
-Ustawienia pokazują wersję pluginu, wersje klienta udostępnione przez API getDebugInfo, wykrycie widoku czatu, liczbę znalezionych kanałów, wynik odczytu grafiki oraz zdarzenia onLoad/onError obrazu. Nie raportujemy sukcesu rysowania na podstawie samego odczytu wiadomości. Zdarzenie onLoad oznacza wczytanie obrazu, ale nie dowodzi, że inne natywne warstwy go nie zasłaniają. Ustawienia zachowują ostatni otwarty serwer, gdy przejście do ekranu ustawień usuwa aktywny kanał. Renderer nadal ustala serwer z kanału konkretnego widoku; prywatne rozmowy pozostają bez tła.
-
-Przycisk Kopiuj diagnostykę zapisuje raport lokalnie w schowku. Nie wysyła go do zewnętrznej usługi i nie kopiuje tokenu, hasła ani adresu załącznika.
-
-## Synchronizacja i wygaszanie
-
-- Odczyt przy wejściu na serwer, przy powrocie aplikacji i co 5 minut, gdy aplikacja jest aktywna.
-- Nowe, edytowane i usunięte wiadomości aktualizują lub ponownie sprawdzają stan.
-- Ponowny odczyt odświeża podpisany URL załącznika; nie jest używany własny proxy.
-- Limit minimum 30 sekund dla automatycznych odczytów, współdzielenie trwającego żądania i backoff 429.
-- Starsza odpowiedź REST nie może nadpisać nowego zdarzenia wiadomości.
-- Zmiana właściciela lub kanału unieważnia stary wpis, a 403/404 usuwa zapamiętaną grafikę.
-- Wyłączenie dodatku usuwa patche, subskrypcje i timery oraz ignoruje późne odpowiedzi.
-
-Nie potwierdzono jeszcze działania na rzeczywistym Androidzie. Revenge Next wymaga osobnego portu. Dla PC lub iOS potrzebny byłby oddzielny dodatek klienta; ta paczka go nie zawiera.
+Compatibility: Revenge Classic expression loader. manifest.hash is SHA-256 of exact served index.js bytes. No external npm dependencies. Native phone verification remains required.

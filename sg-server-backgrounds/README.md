@@ -1,49 +1,47 @@
 # SG Server Backgrounds
 
-**By DonMillson**
+**By DonMillson** — Revenge Classic na Androidzie, **0.2.0-beta.1**.
 
-Wspólna grafika za wiadomościami na serwerze Discorda. Plugin dla **Revenge Classic na Androidzie**, wersja **0.1.0-beta.3**.
+Wybierz obraz z galerii lub plików w ustawieniach pluginu i zapisz go jako wspólne tło za wiadomościami na wszystkich kanałach wybranego serwera. Każdy członek potrzebuje Revenge Classic **oraz tego pluginu**. Wiadomości prywatne nie dostają tła.
 
-## Instalacja
+## Instalacja i aktualizacja
 
-W Revenge otwórz **Ustawienia → Revenge → Plugins / Wtyczki → +**, wklej adres katalogu i włącz plugin:
+Ustawienia → Revenge → Plugins / Wtyczki → +. Wklej adres katalogu:
 
 ```text
 https://raw.githubusercontent.com/DonMillson/revenge-plugins/main/sg-server-backgrounds/
 ```
 
-Revenge pobiera z tego katalogu `manifest.json` i `index.js`. Nie dopisuj nazwy pliku. Każdy członek, który chce widzieć tło, potrzebuje Revenge Classic oraz tego pluginu.
+Nie dopisuj index.js ani manifest.json. Po aktualizacji uruchom aplikację ponownie. W ustawieniach pluginu sprawdź wersję 0.2.0-beta.1. Jeśli masz starszy ekran ustawień, usuń wpis pluginu i dodaj go z tego adresu.
 
-## Ustawienie tła na serwerze
+## Właściciel: wybierz wspólne tło z pliku
 
-1. Właściciel serwera tworzy jeden zwykły kanał tekstowy `#tlo-serwera`.
-2. Członkowie mogą wyświetlać kanał i czytać historię. Wysyłanie wiadomości i załączników pozostaje dla właściciela.
-3. Właściciel wysyła grafikę jako załącznik PNG, JPG lub WEBP. Limit: 10 MB, maksymalnie 4096 px na bok. Podpis może być dowolny. Aby zmienić przyciemnienie lub rozmycie, użyj `TLO dim=0.45 blur=0`.
-4. Nowa grafika właściciela zastępuje poprzednią. Wiadomość `TLO OFF` wyłącza tło.
+1. Otwórz kanał na swoim serwerze, potem Ustawienia → Revenge → Plugins → SG Server Backgrounds → ustawienia (koło zębate).
+2. Wybierz **Użyj obecnie otwartego serwera**, potem **Zapisz wybór serwera**.
+3. W polu **Klucz właściciela** wklej prywatny klucz otrzymany osobno w pliku. Zapisz klucz na swoim telefonie. Nie przekazuj go członkom i nie wrzucaj na Discorda ani do publicznego repozytorium.
+4. Wybierz **Wybierz grafikę z galerii** albo **Wybierz grafikę z plików**. Sprawdź podgląd i opcjonalnie zmień przyciemnienie lub rozmycie.
+5. Wybierz **Zapisz dla wszystkich**. Dopiero komunikat o udanym zapisie oznacza opublikowanie wspólnego obrazu. Pluginy członków pobierają zmianę automatycznie przy otwartej aplikacji, zwykle w ciągu około 30 sekund.
 
-Plugin rozpoznaje serwer po kanale `#tlo-serwera`. W ustawieniach można ograniczyć go do konkretnego ID serwera oraz zmienić przyciemnienie. Prywatne wiadomości nie dostają tła. Boty, webhooki i grafiki innych członków są ignorowane.
+Nie trzeba tworzyć kanału ani wysyłać na niego grafiki. PNG, JPG lub WEBP do 10 MB i 4096 px na bok. Galeria może zmniejszyć zbyt duży obraz do 4096 px. Plik trafia do wspólnej usługi HTTPS i jest dostępny pod publicznym adresem. Nie wybieraj poufnych obrazów.
 
-## Status wersji beta
+**Wyłącz wspólne tło** wyłącza je dla członków po synchronizacji. Przełącznik **Pokaż tło na tym telefonie** zmienia tylko lokalne wyświetlanie.
 
-30 testów automatycznych przeszły, w tym zgodność bundle'a z loaderem Classic i zgodność hasha manifestu. Wyświetlanie grafiki wymaga jeszcze testu w rzeczywistej aplikacji na telefonie; nie deklarujemy zgodności z konkretną wersją Discorda. Revenge Next nie jest obsługiwane.
+## Członkowie
 
-Jeżeli tła nie widać:
+Zainstaluj i włącz plugin z tego samego linku. Otwórz kanał serwera. Klucz właściciela i wybór pliku nie są potrzebne. Plugin pobiera wspólną konfigurację dla serwera; w ustawieniach można ograniczyć wyświetlanie do jednego ID serwera.
 
-1. Sprawdź, że w ustawieniach widnieje wersja **0.1.0-beta.3**. Po aktualizacji pluginu uruchom Revenge ponownie.
-2. Otwórz zwykły kanał tekstowy serwera, potem ustawienia pluginu i wybierz **Odśwież tło**.
-3. W sekcji **Diagnostyka** wybierz **Kopiuj diagnostykę**. Zgłoszenie powinno zawierać ten tekst albo zrzut ekranu sekcji. Status odróżnia brak kanału, brak grafiki właściciela, niewykryty widok wiadomości i błąd pobrania obrazu.
+## Diagnostyka i ograniczenia
 
-Przycisk kopiuje wersje i statusy. Nie kopiuje tokenów, haseł ani adresu załącznika.
+20 testów pluginu i 7 testów wspólnej usługi przeszło. Obejmują wybór pliku, podgląd, zapis, odczyt przez członków bez klucza, wszystkie kanały tego samego serwera, wykluczenie DM, walidację, wyłączenie, konflikt zapisu, wyładowanie i hash bundle'a. To testy automatyczne z atrapami modułów; **nie potwierdzają wyświetlania na konkretnej wersji Discorda ani natywnego wyboru pliku na telefonie**. Revenge Next nie jest obsługiwane.
 
-Plugin odczytuje kanał przez klienta Discorda i nie wysyła ani nie usuwa wiadomości. Licencja MIT.
+Jeśli obraz się nie wyświetla, otwórz kanał, potem wybierz **Odśwież tło → Kopiuj diagnostykę**. Diagnostyka pokazuje wersje aplikacji, synchronizację, wykrycie widoku wiadomości i stan obrazu. Nie zawiera klucza ani adresów obrazów.
+
+Plugin nie odczytuje kanału konfiguracji, nie wysyła wiadomości i nie przekazuje usłudze tokena Discorda. Usługa akceptuje zapis z prywatnym kluczem. Sprawdzenie roli właściciela odbywa się w pluginie; usługa nie weryfikuje niezależnie własności serwera Discorda. Klucz chroni publikowanie w tej usłudze.
 
 ## Rozwój
-
-Źródła i testy znajdują się w tym katalogu. W Node.js 18 lub nowszym uruchom:
 
 ```sh
 npm run check
 ```
 
-Projekt nie ma zewnętrznych zależności. Build aktualizuje `index.js` i `manifest.json` w tym katalogu oraz ich kopie w `dist/`. Opublikuj oba pliki z głównego katalogu pluginu w jednym commicie, aby hash manifestu odpowiadał bundle'owi. Adres instalacji pozostaje ten sam.
-
+Node.js 18 lub nowszy, bez zewnętrznych zależności. Build aktualizuje index.js i manifest.json w katalogu oraz dist/. Publikuj oba pliki w jednym commicie. Adres instalacji zostaje ten sam. Licencja MIT.

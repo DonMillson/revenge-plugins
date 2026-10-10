@@ -1,233 +1,139 @@
 "use strict";
-
-function clampNumber(value, fallback, min, max) {
-    if (value === null || value === undefined || value === "") return fallback;
-    const n = Number(value);
-    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+function isSnowflake(value) { return /^\d{15,22}$/.test(String(value || "")); }
+function serviceBase(value) {
+    const base = String(value || "").replace(/\/$/, "");
+    if (!/^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::443)?$/.test(base)) throw new Error("Niepoprawny adres usługi tła.");
+    return base;
 }
-
-function compareIds(a, b) {
-    a = String(a || "");
-    b = String(b || "");
-    return a.length === b.length ? (a === b ? 0 : a > b ? 1 : -1) : a.length > b.length ? 1 : -1;
-}
-
-function safeImageUrl(value) {
-    if (typeof value !== "string" || value.length > 4096) return null;
-    // Hermes versions differ in their URL implementation. No global URL dependency.
-    const match = /^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)(\/attachments\/[^\s?#]+)(\?[^\s#]*)?$/i.exec(value);
-    if (!match || /(?:^|[\/\\])\.\.(?:[\/\\]|$)/.test(match[2])) return null;
-    return value;
-}
-
-function isSnowflake(value) {
-    return typeof value === "string" && /^\d{15,22}$/.test(value);
-}
-
-function parseThemeMessage(message, ownerId, defaults) {
-    if (!message || !ownerId || String(message.author?.id || "") !== String(ownerId)) return null;
-    if (message.webhook_id || message.author?.bot || !isSnowflake(String(message.id || ""))) return null;
-    const content = String(message.content || "").trim();
-    const normalized = content.toLowerCase().replace(/ł/g, "l").replace(/ó/g, "o").replace(/ą/g, "a");
-    if (/^!?tlo\s+(off|wylacz)$/.test(normalized)) {
-        return { messageId: String(message.id), ownerId: String(ownerId), enabled: false };
-    }
-    const hasOptions = /^!?tlo(?:\s|$)/i.test(normalized);
-    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-    const attachment = attachments.find(a => {
-        const mime = a?.content_type || a?.contentType || "";
-        return /\.(png|jpe?g|webp)$/i.test(String(a?.filename || "")) &&
-            (!mime || /^image\/(png|jpeg|webp)$/i.test(mime)) &&
-            Number(a?.size || 0) <= defaults.maxImageBytes &&
-            Number(a?.width || 0) <= defaults.maxImageDimension &&
-            Number(a?.height || 0) <= defaults.maxImageDimension &&
-            safeImageUrl(a?.url);
+function validateManifest(data, guildId, defaults) {
+    if (!data || data.schema !== 1 || String(data.guildId) !== String(guildId) || !isSnowflake(guildId) ||
+        !/^[a-f0-9]{32}$/.test(data.revision || "") || typeof data.enabled !== "boolean" ||
+        !Number.isFinite(Date.parse(data.updatedAt))) throw new Error("Usługa zwróciła niepoprawne ustawienia tła.");
+    const result = { schema: 1, guildId: String(guildId), revision: data.revision, enabled: data.enabled, updatedAt: data.updatedAt };
+    if (!data.enabled) return result;
+    if (data.assetPath !== "/assets/" + guildId + "/" + data.revision ||
+        !["image/png", "image/jpeg", "image/webp"].includes(data.mimeType) ||
+        !Number.isInteger(data.size) || data.size < 1 || data.size > defaults.maxImageBytes ||
+        !Number.isInteger(data.width) || !Number.isInteger(data.height) ||
+        data.width < 1 || data.height < 1 || Math.max(data.width, data.height) > defaults.maxImageDimension ||
+        !Number.isFinite(data.dim) || data.dim < 0 || data.dim > 0.9 ||
+        !Number.isFinite(data.blur) || data.blur < 0 || data.blur > 20) throw new Error("Usługa zwróciła niepoprawną grafikę.");
+    return Object.assign(result, {
+        assetPath: data.assetPath, mimeType: data.mimeType, size: data.size, width: data.width, height: data.height,
+        dim: data.dim, blur: data.blur,
+        fileName: String(data.fileName || data.filename || "tlo").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 120),
+        filename: String(data.fileName || data.filename || "tlo").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 120),
+        url: serviceBase(defaults.serviceUrl) + data.assetPath
     });
-    if (!attachment) return null;
-    const options = {};
-    const optionPattern = /\b(dim|blur)\s*=\s*([0-9]+(?:[.,][0-9]+)?)/g;
-    let match;
-    while (hasOptions && (match = optionPattern.exec(normalized))) {
-        options[match[1]] = match[2].replace(",", ".");
+}
+function normalizeAsset(asset, defaults) {
+    const uri = String(asset?.fileCopyUri || asset?.uri || "");
+    if (!/^(?:file|content|ph|assets-library):/.test(uri)) throw new Error("Wybierz plik z telefonu.");
+    const name = String(asset.fileName || asset.name || "tlo").split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 120) || "tlo";
+    let type = String(asset.type || "").toLowerCase();
+    if (!type || type === "application/octet-stream" || type === "image/*") {
+        type = /\.png$/i.test(name) ? "image/png" : /\.jpe?g$/i.test(name) ? "image/jpeg" : /\.webp$/i.test(name) ? "image/webp" : "";
     }
-    return {
-        messageId: String(message.id),
-        ownerId: String(ownerId),
-        enabled: true,
-        url: safeImageUrl(attachment.url),
-        dim: clampNumber(options.dim, defaults.dim, 0, 0.9),
-        blur: clampNumber(options.blur, defaults.blur, 0, 20),
-        filename: String(attachment.filename)
-    };
+    if (type === "image/jpg") type = "image/jpeg";
+    if (!["image/png", "image/jpeg", "image/webp"].includes(type)) throw new Error("Wybierz PNG, JPG lub WEBP.");
+    const size = Number(asset.fileSize ?? asset.size ?? 0);
+    if (size > defaults.maxImageBytes) throw new Error("Plik może mieć najwyżej 10 MB.");
+    if (Math.max(Number(asset.width) || 0, Number(asset.height) || 0) > defaults.maxImageDimension) throw new Error("Grafika może mieć najwyżej 4096 px na bok.");
+    const base64 = typeof asset.base64 === "string" ? asset.base64 : "";
+    if (base64.length > Math.ceil(defaults.maxImageBytes / 3) * 4) throw new Error("Plik może mieć najwyżej 10 MB.");
+    return { uri, name, type, size, base64 };
 }
-
-function latestTheme(messages, ownerId, defaults) {
-    return messages.map(m => parseThemeMessage(m, ownerId, defaults)).filter(Boolean)
-        .sort((a, b) => -compareIds(a.messageId, b.messageId))[0] || null;
-}
-
-function findThemeChannel(channels, guildId, name) {
-    const matches = channels.filter(c => c && String(c.guild_id || c.guildId || "") === String(guildId) &&
-        c.type === 0 && c.name === name);
-    // Duplicate names need an explicit resolution; do not arbitrarily trust the first channel.
-    return matches.length === 1 ? matches[0] : null;
-}
-
-function retryDelay(error) {
-    const seconds = error?.body?.retry_after ?? error?.response?.body?.retry_after ?? 5;
-    return clampNumber(seconds, 5, 1, 3600) * 1000;
-}
-
-function createController(adapter, defaults, settings) {
-    const statuses = Object.create(null);
-    const inFlight = new Map();
-    const fetchedAt = new Map();
-    const revisions = new Map();
-    let running = false;
-    let generation = 0;
-    let requestAfter = 0;
-    if (!settings.cache || typeof settings.cache !== "object") settings.cache = {};
-    const clock = adapter.now || Date.now;
-    const notify = () => { try { adapter.changed(); } catch (_) {} };
-    function status(guildId, text) {
-        if (statuses[guildId] === text) return;
-        statuses[guildId] = text;
-        notify();
+function uploadRequest(asset, dim, blur, key, FormDataType) {
+    if (!asset || !asset.uri) throw new Error("Najpierw wybierz grafikę.");
+    if (!Number.isFinite(dim) || dim < 0 || dim > 0.9 || !Number.isFinite(blur) || blur < 0 || blur > 20) throw new Error("Sprawdź przyciemnienie (0–0,9) i rozmycie (0–20).");
+    const headers = { "X-Owner-Key": key };
+    let body;
+    if (asset.base64) {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify({ base64: asset.base64, fileName: asset.name, mimeType: asset.type, dim, blur });
+    } else {
+        if (!FormDataType) throw new Error("Ta wersja aplikacji nie obsługuje przesyłania plików. Spróbuj wyboru z galerii.");
+        body = new FormDataType();
+        body.append("image", { uri: asset.uri, name: asset.name, type: asset.type });
+        body.append("dim", String(dim));
+        body.append("blur", String(blur));
     }
-    function resolveContext(guildId) {
-        const fail = problem => ({ context: null, problem });
-        if (!running) return fail("Dodatek nie jest uruchomiony.");
-        if (settings.enabled === false) return fail("Tło jest wyłączone w ustawieniach pluginu.");
-        if (!isSnowflake(String(guildId || ""))) return fail("Najpierw otwórz kanał tekstowy na swoim serwerze.");
-        const target = settings.targetGuildId || defaults.targetGuildId;
-        if (target && target !== String(guildId)) return fail("Otwarty serwer różni się od ID zapisanego w ustawieniach pluginu.");
-        let guild, channels;
-        try { guild = adapter.getGuild(guildId); channels = adapter.getChannels(guildId); } catch (_) { return fail("Nie udało się odczytać danych serwera lub jego kanałów."); }
-        if (!guild) return fail("Nie odczytano danych serwera. Otwórz jego kanał i odśwież tło.");
-        const ownerId = String(guild?.ownerId || guild?.owner_id || "");
-        if (!isSnowflake(ownerId)) return fail("Nie odczytano właściciela serwera. Otwórz jego kanał i odśwież tło.");
-        const name = settings.channelName || defaults.channelName;
-        const matching = (channels || []).filter(c => c && String(c.guild_id || c.guildId || "") === String(guildId) && c.type === 0 && c.name === name);
-        if (!matching.length) return fail("Nie znaleziono zwykłego kanału tekstowego #" + name + ". Sprawdź nazwę i dostęp do kanału.");
-        if (matching.length > 1) return fail("Znaleziono kilka kanałów #" + name + ". Pozostaw jeden kanał o tej nazwie.");
-        const channel = matching[0];
-        if (!isSnowflake(String(channel.id))) return fail("Nie odczytano ID kanału tła.");
-        return { context: { guildId: String(guildId), ownerId, channelId: String(channel.id) }, problem: null };
-    }
+    return { method: "PUT", headers, body };
+}
+function createController(deps, defaults, settings) {
+    const cache = new Map(), states = new Map(), requests = new Map(), epochs = new Map();
+    let active = false, generation = 0;
+    const now = deps.now || Date.now;
+    const changed = () => deps.changed?.();
+    const base = serviceBase(defaults.serviceUrl);
     function context(guildId) {
-        return resolveContext(guildId).context;
+        if (!isSnowflake(guildId)) return null;
+        const guild = deps.getGuild(guildId);
+        const ownerId = String(guild?.ownerId || guild?.owner_id || "");
+        return guild ? { guildId: String(guildId), ownerId } : null;
     }
-    function sameContext(a, b) {
-        return a && b && a.guildId === b.guildId && a.ownerId === b.ownerId && a.channelId === b.channelId;
+    function contextProblem(guildId) {
+        if (settings.enabled === false) return "Tło jest wyłączone na tym telefonie.";
+        if (!isSnowflake(guildId)) return "Otwórz kanał na swoim serwerze.";
+        if (settings.targetGuildId && String(settings.targetGuildId) !== String(guildId)) return "W ustawieniach wybrano inny serwer.";
+        if (!context(guildId)) return "Serwer nie jest jeszcze wczytany.";
+        return "";
     }
-    function snapshot(guildId) {
-        const ctx = context(guildId);
-        const theme = settings.cache[guildId];
-        if (!ctx || !theme || theme.ownerId !== ctx.ownerId || theme.channelId !== ctx.channelId) return null;
-        if (!isSnowflake(theme.messageId)) return null;
-        if (theme.enabled !== true || !safeImageUrl(theme.url)) return null;
-        return Object.assign({}, theme, {
-            dim: clampNumber(settings.localDim, clampNumber(theme.dim, defaults.dim, 0, 0.9), 0, 0.9),
-            blur: clampNumber(theme.blur, defaults.blur, 0, 20)
-        });
+    function persist() {
+        const entries = Array.from(cache.entries()).slice(-20);
+        settings.sharedThemes = Object.fromEntries(entries);
     }
-    function accept(ctx, messages, authoritative) {
-        if (!sameContext(ctx, context(ctx.guildId))) return;
-        const theme = latestTheme(messages, ctx.ownerId, defaults);
-        const previous = settings.cache[ctx.guildId];
-        if (!authoritative && (!theme || previous && compareIds(theme.messageId, previous.messageId) < 0)) return;
-        if (!theme) {
-            delete settings.cache[ctx.guildId];
-            status(ctx.guildId, "Brak grafiki właściciela w #" + (settings.channelName || defaults.channelName) + ".");
-        } else {
-            settings.cache[ctx.guildId] = Object.assign({}, theme, { channelId: ctx.channelId });
-            status(ctx.guildId, theme.enabled ? "Tło: " + theme.filename : "Właściciel wyłączył tło.");
-        }
-        notify();
-    }
-    async function sync(guildId, force) {
-        const resolved = resolveContext(guildId);
-        const ctx = resolved.context;
-        if (!ctx) {
-            if (running) status(guildId || "", resolved.problem);
-            return;
-        }
-        if (inFlight.has(ctx.guildId)) return inFlight.get(ctx.guildId);
-        if (clock() < requestAfter) return;
-        if (!force && fetchedAt.has(ctx.guildId) && clock() - fetchedAt.get(ctx.guildId) < defaults.minFetchMs) return;
-        const ownGeneration = generation;
-        const ownRevision = revisions.get(ctx.guildId) || 0;
-        let superseded = false;
-        try {
-            const loaded = !force && adapter.getLoadedMessages?.(ctx.channelId);
-            if (Array.isArray(loaded)) accept(ctx, loaded, false);
-        } catch (_) {}
-        status(ctx.guildId, "Sprawdzam grafikę właściciela…");
-        fetchedAt.set(ctx.guildId, clock());
-        const work = Promise.resolve().then(() => adapter.getMessages(ctx.channelId)).then(messages => {
-            if (!running || generation !== ownGeneration || !sameContext(ctx, context(ctx.guildId))) return;
-            if ((revisions.get(ctx.guildId) || 0) !== ownRevision) { superseded = true; return; }
-            if (!Array.isArray(messages)) throw new Error("Niepoprawna odpowiedź listy wiadomości.");
-            accept(ctx, messages, true);
-        }).catch(error => {
-            if (!running || generation !== ownGeneration) return;
-            const code = Number(error?.status || error?.response?.status || error?.body?.status || 0);
-            if (code === 429) {
-                requestAfter = clock() + retryDelay(error);
-                status(ctx.guildId, "Limit odczytów. Spróbuj ponownie za chwilę.");
-            } else if (code === 403 || code === 404) {
-                delete settings.cache[ctx.guildId];
-                status(ctx.guildId, "Brak dostępu do kanału tła lub historii wiadomości.");
-            } else {
-                status(ctx.guildId, "Nie udało się odświeżyć tła. Sprawdź połączenie i użyj Odśwież.");
-            }
-        }).finally(() => {
-            if (inFlight.get(ctx.guildId) === work) inFlight.delete(ctx.guildId);
-            if (superseded && running && generation === ownGeneration) void sync(ctx.guildId, true);
-        });
-        inFlight.set(ctx.guildId, work);
-        return work;
-    }
-    function event(action) {
-        if (!running || !action) return;
-        const channelId = String(action.channelId || action.channel_id || action.message?.channel_id || action.message?.channelId || "");
-        let channel;
-        try { channel = adapter.getChannel(channelId); } catch (_) { return; }
-        const guildId = String(channel?.guild_id || channel?.guildId || "");
-        const ctx = context(guildId);
-        if (!ctx || ctx.channelId !== channelId) return;
-        if (action.type === "MESSAGE_CREATE" && action.message) {
-            if (!parseThemeMessage(action.message, ctx.ownerId, defaults)) return;
-            revisions.set(guildId, (revisions.get(guildId) || 0) + 1);
-            accept(ctx, [action.message], false);
-        } else if (action.type === "MESSAGE_UPDATE") {
-            revisions.set(guildId, (revisions.get(guildId) || 0) + 1);
-            const cached = settings.cache[guildId];
-            const messageId = String(action.message?.id || action.id || "");
-            // Edited payloads can be partial. Hide a changed active image until validated again.
-            if (cached?.messageId === messageId) { delete settings.cache[guildId]; notify(); }
-            return sync(guildId, true);
-        } else if (action.type === "MESSAGE_DELETE" || action.type === "MESSAGE_DELETE_BULK") {
-            const ids = action.ids || [action.id || action.messageId];
-            if (ids.some(id => String(id) === settings.cache[guildId]?.messageId)) {
-                revisions.set(guildId, (revisions.get(guildId) || 0) + 1);
-                delete settings.cache[guildId];
-                notify();
-                return sync(guildId, true);
-            }
-        }
+    function accept(guildId, data) {
+        const theme = validateManifest(data, guildId, defaults);
+        const old = cache.get(guildId);
+        if (old && Date.parse(old.updatedAt) > Date.parse(theme.updatedAt)) return old;
+        cache.set(guildId, theme); persist();
+        states.set(guildId, { last: now(), failures: 0, next: 0, text: theme.enabled ? "Wspólne tło: " + theme.filename : "Właściciel wyłączył wspólne tło." });
+        changed(); return theme;
     }
     return {
-        start() { running = true; generation++; notify(); },
-        stop() { running = false; generation++; inFlight.clear(); notify(); },
-        context, snapshot, sync, event,
-        contextProblem(guildId) { return resolveContext(guildId).problem; },
-        status(guildId) { return statuses[guildId] || "Oczekuję na kanał tła."; },
-        changed() { generation++; inFlight.clear(); notify(); },
-        imageError(guildId) { status(guildId, "Nie udało się wczytać obrazka. Użyj Odśwież lub prześlij grafikę ponownie."); },
-        isRunning() { return running; }
+        start() {
+            active = true; generation++;
+            for (const [id, data] of Object.entries(settings.sharedThemes || {}).slice(-20)) {
+                try { cache.set(id, validateManifest(data, id, defaults)); } catch (_) {}
+            }
+        },
+        stop() { active = false; generation++; requests.clear(); },
+        changed,
+        context, contextProblem,
+        status(guildId) { return states.get(guildId)?.text || (cache.get(guildId)?.enabled ? "Wspólne tło zapisane w pamięci; sprawdzam aktualizację." : "Nie ustawiono wspólnego tła."); },
+        snapshot(guildId) {
+            if (!active || contextProblem(guildId)) return null;
+            const theme = cache.get(guildId);
+            if (!theme?.enabled) return null;
+            const localDim = settings.localDim;
+            return localDim != null && Number.isFinite(localDim) ? Object.assign({}, theme, { dim: Math.max(0, Math.min(0.9, localDim)) }) : theme;
+        },
+        publish(guildId, data) {
+            if (!active) return null;
+            epochs.set(guildId, (epochs.get(guildId) || 0) + 1);
+            return accept(guildId, data);
+        },
+        imageError(guildId) { const state = states.get(guildId) || {}; states.set(guildId, { ...state, text: "Nie udało się wczytać obrazu. Odśwież tło i skopiuj diagnostykę." }); changed(); },
+        sync(guildId, force) {
+            if (!active || contextProblem(guildId)) return Promise.resolve(null);
+            if (requests.has(guildId)) return requests.get(guildId);
+            const state = states.get(guildId) || { last: -Infinity, next: 0, failures: 0 };
+            if (now() < state.next || (!force && now() - state.last < defaults.minFetchMs)) return Promise.resolve(cache.get(guildId));
+            const version = generation, epoch = epochs.get(guildId) || 0;
+            state.last = now(); state.text = "Sprawdzam wspólne tło…"; states.set(guildId, state); changed();
+            const request = Promise.resolve().then(() => deps.getManifest(base + "/api/guilds/" + guildId)).then(data => {
+                if (!active || generation !== version || (epochs.get(guildId) || 0) !== epoch) return null;
+                if (!data) { cache.delete(guildId); persist(); states.set(guildId, { last: now(), failures: 0, next: 0, text: "Nie ustawiono wspólnego tła. Właściciel może wybrać plik w ustawieniach." }); changed(); return null; }
+                return accept(guildId, data);
+            }).catch(error => {
+                if (!active || generation !== version || (epochs.get(guildId) || 0) !== epoch) return null;
+                const failures = state.failures + 1;
+                const retry = Number(error?.retryMs) || Math.min(300000, 15000 * 2 ** Math.min(failures - 1, 4));
+                states.set(guildId, { last: now(), failures, next: now() + retry, text: Number(error?.status) === 429 ? "Usługa ograniczyła odświeżanie. Ponowię automatycznie." : "Nie udało się pobrać wspólnego tła. Sprawdź połączenie i odśwież." }); changed(); return null;
+            }).finally(() => { if (requests.get(guildId) === request) requests.delete(guildId); });
+            requests.set(guildId, request); return request;
+        }
     };
 }
-
-// Node exports are removed from the installable bundle by the build script.
-module.exports = { clampNumber, compareIds, safeImageUrl, isSnowflake, parseThemeMessage, latestTheme, findThemeChannel, createController };
+module.exports = { isSnowflake, serviceBase, validateManifest, normalizeAsset, uploadRequest, createController };

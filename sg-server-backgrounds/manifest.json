@@ -1,14 +1,14 @@
 {
   "name": "SG Server Backgrounds",
-  "description": "By DonMillson. Wspólne tło za wiadomościami, publikowane przez właściciela w #tlo-serwera. Revenge Classic; wersja beta.",
+  "description": "By DonMillson. Wybierz grafikę z galerii lub plików w ustawieniach i zapisz jako wspólne tło wszystkich kanałów serwera. Revenge Classic; wersja beta.",
   "authors": [
     {
       "name": "DonMillson"
     }
   ],
   "main": "index.js",
-  "version": "0.1.0-beta.3",
-  "hash": "446368938ce05cb6cf111f8cc19d16f5517df4fec3697032039685f3058cc99b",
+  "version": "0.2.0-beta.1",
+  "hash": "e131ca30516ad2347b9d918b4c294051da22d44c200593b8c255d9f90526849a",
   "vendetta": {
     "icon": "ImageIcon"
   }

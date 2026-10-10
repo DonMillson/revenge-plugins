@@ -8,7 +8,7 @@ const config = JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8"
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 if (config.version !== pkg.version) throw new Error("Wersje package.json i config.json muszą być zgodne.");
 if (config.targetGuildId && !/^\d{15,22}$/.test(config.targetGuildId)) throw new Error("Niepoprawne ID serwera.");
-if (!/^[a-z0-9_-]{1,100}$/.test(config.channelName)) throw new Error("Niepoprawna nazwa kanału.");
+if (!/^https:\/\/[a-z0-9.-]+$/.test(config.serviceUrl)) throw new Error("Niepoprawny adres usługi.");
 if (!(config.refreshMs >= 30000 && config.minFetchMs >= 1000)) throw new Error("Zbyt częste odświeżanie.");
 const source = ["core.js", "plugin.js"].map(name => fs.readFileSync(path.join(root, "src", name), "utf8")
     .replace(/^module\.exports = .*;\s*$/m, "")).join("\n");
@@ -17,7 +17,7 @@ const bundle = "(() => {\n" + source + "\nreturn createPlugin(vendetta, " + JSON
 vm.compileFunction("return " + bundle, ["vendetta"]);
 const manifest = {
     name: config.name,
-    description: "By DonMillson. Wspólne tło za wiadomościami, publikowane przez właściciela w #" + config.channelName + ". Revenge Classic; wersja beta.",
+    description: "By DonMillson. Wybierz grafikę z galerii lub plików w ustawieniach i zapisz jako wspólne tło wszystkich kanałów serwera. Revenge Classic; wersja beta.",
     authors: [{ name: "DonMillson" }],
     main: "index.js",
     version: config.version,
