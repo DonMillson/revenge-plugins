@@ -1,0 +1,13 @@
+{
+  "name": "sg-server-backgrounds",
+  "version": "0.1.0-beta.3",
+  "private": true,
+  "description": "Wspólna tapeta czatu serwera dla Revenge Classic",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "test": "node --test test/*.test.cjs",
+    "check": "npm run build && npm test"
+  }
+}

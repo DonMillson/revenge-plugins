@@ -33,7 +33,7 @@ function parseThemeMessage(message, ownerId, defaults) {
     if (/^!?tlo\s+(off|wylacz)$/.test(normalized)) {
         return { messageId: String(message.id), ownerId: String(ownerId), enabled: false };
     }
-    if (content && !/^!?tlo(?:\s|$)/i.test(normalized)) return null;
+    const hasOptions = /^!?tlo(?:\s|$)/i.test(normalized);
     const attachments = Array.isArray(message.attachments) ? message.attachments : [];
     const attachment = attachments.find(a => {
         const mime = a?.content_type || a?.contentType || "";
@@ -48,7 +48,7 @@ function parseThemeMessage(message, ownerId, defaults) {
     const options = {};
     const optionPattern = /\b(dim|blur)\s*=\s*([0-9]+(?:[.,][0-9]+)?)/g;
     let match;
-    while ((match = optionPattern.exec(normalized))) {
+    while (hasOptions && (match = optionPattern.exec(normalized))) {
         options[match[1]] = match[2].replace(",", ".");
     }
     return {
@@ -95,17 +95,28 @@ function createController(adapter, defaults, settings) {
         statuses[guildId] = text;
         notify();
     }
-    function context(guildId) {
-        if (!running || settings.enabled === false || !isSnowflake(String(guildId || ""))) return null;
+    function resolveContext(guildId) {
+        const fail = problem => ({ context: null, problem });
+        if (!running) return fail("Dodatek nie jest uruchomiony.");
+        if (settings.enabled === false) return fail("Tło jest wyłączone w ustawieniach pluginu.");
+        if (!isSnowflake(String(guildId || ""))) return fail("Najpierw otwórz kanał tekstowy na swoim serwerze.");
         const target = settings.targetGuildId || defaults.targetGuildId;
-        if (target && target !== String(guildId)) return null;
+        if (target && target !== String(guildId)) return fail("Otwarty serwer różni się od ID zapisanego w ustawieniach pluginu.");
         let guild, channels;
-        try { guild = adapter.getGuild(guildId); channels = adapter.getChannels(guildId); } catch (_) { return null; }
+        try { guild = adapter.getGuild(guildId); channels = adapter.getChannels(guildId); } catch (_) { return fail("Nie udało się odczytać danych serwera lub jego kanałów."); }
+        if (!guild) return fail("Nie odczytano danych serwera. Otwórz jego kanał i odśwież tło.");
         const ownerId = String(guild?.ownerId || guild?.owner_id || "");
-        if (!isSnowflake(ownerId)) return null;
-        const channel = findThemeChannel(channels || [], guildId, settings.channelName || defaults.channelName);
-        if (!channel || !isSnowflake(String(channel.id))) return null;
-        return { guildId: String(guildId), ownerId, channelId: String(channel.id) };
+        if (!isSnowflake(ownerId)) return fail("Nie odczytano właściciela serwera. Otwórz jego kanał i odśwież tło.");
+        const name = settings.channelName || defaults.channelName;
+        const matching = (channels || []).filter(c => c && String(c.guild_id || c.guildId || "") === String(guildId) && c.type === 0 && c.name === name);
+        if (!matching.length) return fail("Nie znaleziono zwykłego kanału tekstowego #" + name + ". Sprawdź nazwę i dostęp do kanału.");
+        if (matching.length > 1) return fail("Znaleziono kilka kanałów #" + name + ". Pozostaw jeden kanał o tej nazwie.");
+        const channel = matching[0];
+        if (!isSnowflake(String(channel.id))) return fail("Nie odczytano ID kanału tła.");
+        return { context: { guildId: String(guildId), ownerId, channelId: String(channel.id) }, problem: null };
+    }
+    function context(guildId) {
+        return resolveContext(guildId).context;
     }
     function sameContext(a, b) {
         return a && b && a.guildId === b.guildId && a.ownerId === b.ownerId && a.channelId === b.channelId;
@@ -136,9 +147,10 @@ function createController(adapter, defaults, settings) {
         notify();
     }
     async function sync(guildId, force) {
-        const ctx = context(guildId);
+        const resolved = resolveContext(guildId);
+        const ctx = resolved.context;
         if (!ctx) {
-            if (running) status(guildId || "", "Otwórz serwer z jednym kanałem #" + (settings.channelName || defaults.channelName) + ".");
+            if (running) status(guildId || "", resolved.problem);
             return;
         }
         if (inFlight.has(ctx.guildId)) return inFlight.get(ctx.guildId);
@@ -210,6 +222,7 @@ function createController(adapter, defaults, settings) {
         start() { running = true; generation++; notify(); },
         stop() { running = false; generation++; inFlight.clear(); notify(); },
         context, snapshot, sync, event,
+        contextProblem(guildId) { return resolveContext(guildId).problem; },
         status(guildId) { return statuses[guildId] || "Oczekuję na kanał tła."; },
         changed() { generation++; inFlight.clear(); notify(); },
         imageError(guildId) { status(guildId, "Nie udało się wczytać obrazka. Użyj Odśwież lub prześlij grafikę ponownie."); },
@@ -227,6 +240,7 @@ function createPlugin(api, defaults) {
     let chatPatched = false;
     let renderEnabled = false;
     let compatibility = "Dodatek nie jest uruchomiony.";
+    const viewState = { channelId: "", imageKey: "", image: "Obraz nie został jeszcze przekazany do widoku czatu.", surfaceCount: 0 };
     const cleanup = [];
     const listeners = new Set();
     const timers = new Set();
@@ -246,19 +260,39 @@ function createPlugin(api, defaults) {
         const channel = getChannel(id);
         return String(channel?.guild_id || channel?.guildId || "");
     }
-    function currentGuildId() { return guildForChannel(selectedChannelId()); }
+    function currentGuildId() {
+        const id = guildForChannel(selectedChannelId());
+        if (isSnowflake(id)) settings.lastGuildId = id;
+        const selectedGuild = safe(() => String(stores.selectedGuild?.getGuildId?.() || ""), "");
+        return id || (isSnowflake(selectedGuild) ? selectedGuild : "") || settings.targetGuildId || defaults.targetGuildId || settings.lastGuildId || "";
+    }
     function channelsInGuild(guildId) {
-        const result = safe(() => stores.channels?.getMutableGuildChannelsForGuild?.(guildId), null) ||
-            safe(() => stores.channels?.getGuildChannels?.(guildId), null) ||
-            safe(() => stores.channels?.getChannels?.(), null) ||
-            safe(() => stores.guildChannels?.getChannels?.(guildId), null);
         const found = new Map();
+        const seen = new Set();
         function walk(value, depth) {
-            if (!value || typeof value !== "object" || depth > 5) return;
-            if (value.id && (value.guild_id || value.guildId)) { found.set(String(value.id), value); return; }
+            if (!value || typeof value !== "object" || depth > 6 || seen.has(value)) return;
+            seen.add(value);
+            if (value.id && (value.guild_id || value.guildId)) {
+                if (String(value.guild_id || value.guildId) === String(guildId)) found.set(String(value.id), value);
+                return;
+            }
+            if (typeof value.get === "function" && typeof value.forEach === "function") {
+                safe(() => value.forEach(child => walk(child, depth + 1)));
+                return;
+            }
             Object.keys(value).forEach(key => safe(() => walk(value[key], depth + 1)));
         }
-        walk(result, 0);
+        const sources = [
+            () => stores.channels?.getMutableGuildChannelsForGuild?.(guildId),
+            () => stores.channels?.getGuildChannels?.(guildId),
+            () => stores.channels?.getGuildChannelsForGuild?.(guildId),
+            () => stores.guildChannels?.getChannels?.(guildId)
+        ];
+        sources.forEach(source => walk(safe(source, null), 0));
+        const name = settings.channelName || defaults.channelName;
+        if (!Array.from(found.values()).some(c => c.type === 0 && c.name === name)) {
+            walk(safe(() => stores.channels?.getChannels?.(), null), 0);
+        }
         return Array.from(found.values());
     }
     function loadedMessages(id) {
@@ -285,6 +319,7 @@ function createPlugin(api, defaults) {
         const patch = {};
         let changed = false;
         if ((depth === 0 && props.style !== undefined) || Object.prototype.hasOwnProperty.call(props, "HACK_fixModalInteraction")) {
+            if (Object.prototype.hasOwnProperty.call(props, "HACK_fixModalInteraction")) budget.surfaceCount++;
             patch.style = [props.style, { backgroundColor: "transparent" }];
             changed = true;
         }
@@ -308,20 +343,29 @@ function createPlugin(api, defaults) {
         React.useEffect(() => { if (active && guildId) void controller?.sync(guildId, false); }, [guildId]);
         const theme = controller?.snapshot(guildId);
         if (!active || !renderEnabled || !theme || brokenImages.has(theme.url)) return props.original;
+        const imageKey = theme.messageId + theme.url;
+        if (viewState.imageKey !== imageKey) {
+            viewState.imageKey = imageKey;
+            viewState.image = "Wczytuję obraz: " + theme.filename;
+        }
+        const budget = { count: 0, surfaceCount: 0 };
+        const original = transparentTree(props.original, 0, budget);
+        viewState.surfaceCount = budget.surfaceCount;
         const fill = { position: "absolute", left: 0, top: 0, right: 0, bottom: 0 };
-        return React.createElement(RN.View, { style: { flex: 1 }, collapsable: false },
+        return React.createElement(RN.View, { style: { flex: 1, height: "100%" }, collapsable: false },
             React.createElement(RN.Image, {
-                key: theme.messageId + theme.url,
+                key: imageKey,
                 source: { uri: theme.url }, resizeMode: "cover", blurRadius: theme.blur,
                 style: fill, pointerEvents: "none", accessible: false,
-                onError() { brokenImages.add(theme.url); controller.imageError(guildId); notify(); }
+                onLoad() { if (active && viewState.imageKey === imageKey) { viewState.image = "Obraz wczytany: " + theme.filename; notify(); } },
+                onError() { if (!active) return; brokenImages.add(theme.url); if (viewState.imageKey === imageKey) viewState.image = "Błąd wczytania obrazu: " + theme.filename; controller.imageError(guildId); notify(); }
             }),
             React.createElement(RN.View, {
                 pointerEvents: "none", accessible: false,
                 style: [fill, { backgroundColor: "rgba(0,0,0," + theme.dim + ")" }]
             }),
             React.createElement(RN.View, { style: { flex: 1, backgroundColor: "transparent" } },
-                transparentTree(props.original, 0, { count: 0 }))
+                original)
         );
     }
     let Boundary;
@@ -351,6 +395,7 @@ function createPlugin(api, defaults) {
                     if (!active || !original) return original;
                     try {
                         const channelId = channelIdFrom(args[0]);
+                        viewState.channelId = channelId;
                         const child = React.createElement(Background, { channelId, original });
                         return React.createElement(Boundary, { key: channelId, original }, child);
                     } catch (_) { return original; }
@@ -369,13 +414,35 @@ function createPlugin(api, defaults) {
         return false;
     }
     function refresh(force) {
-        if (!active || !controller) return Promise.resolve();
+        if (!active) return Promise.resolve();
+        if (!controller && !initialize()) { notify(); return Promise.resolve(); }
         installChatPatch();
         const guildId = currentGuildId();
         if (!guildId) { notify(); return Promise.resolve(); }
         if (force) brokenImages.clear();
         notify();
         return controller.sync(guildId, force);
+    }
+    function diagnosticText() {
+        const info = safe(() => api.debug?.getDebugInfo?.(), null);
+        const guildId = currentGuildId();
+        const status = controller ? controller.contextProblem(guildId) || controller.status(guildId) : "Odczyt wiadomości nie jest uruchomiony.";
+        const context = controller?.context(guildId);
+        const userId = safe(() => String(stores.users?.getCurrentUser?.()?.id || ""), "");
+        return [
+            "SG Server Backgrounds " + defaults.version + " — By DonMillson",
+            "Discord: " + (info?.discord?.version || "brak danych") + " (build " + (info?.discord?.build || "?") + ")",
+            "Revenge: " + (info?.bunny?.version || info?.vendetta?.version || api.version || "brak danych"),
+            compatibility,
+            "Serwer: " + (safe(() => stores.guilds?.getGuild?.(guildId)?.name, "") || (guildId ? "wykryty" : "niewykryty")),
+            "Kanał konfiguracji: #" + (settings.channelName || defaults.channelName),
+            "Liczba wykrytych kanałów serwera: " + channelsInGuild(guildId).length,
+            "Właściciel serwera: " + (context && userId ? userId === context.ownerId ? "tak" : "nie; grafikę musi wysłać właściciel" : "brak danych"),
+            "Odczyt: " + status,
+            "Widok wiadomości po włączeniu: " + (viewState.channelId ? "wykryty" : "jeszcze niewykryty"),
+            viewState.image,
+            "Kontener listy wiadomości: " + (viewState.surfaceCount ? "wykryty" : "niewykryty")
+        ].join("\n");
     }
     function Settings() {
         if (!React || !RN) return null;
@@ -427,22 +494,28 @@ function createPlugin(api, defaults) {
             }),
             button("Odśwież tło", () => { void refresh(true); }),
             feedback ? text(feedback, { color: "#86e5ad" }) : null,
-            text(compatibility, { fontSize: 14, color: chatPatched ? "#86e5ad" : "#ffd28b" }),
-            text(controller?.status(guildId) || "Brak zgodnego API.", { fontSize: 14 }),
+            text("Diagnostyka", { fontSize: 20, fontWeight: "700", marginTop: 12 }),
+            text(diagnosticText(), { fontSize: 14, selectable: true }),
+            button("Kopiuj diagnostykę", () => {
+                const clipboard = safe(() => api.metro.common.clipboard, null);
+                if (!clipboard?.setString) return setFeedback("Zrób zrzut ekranu powyższej diagnostyki.");
+                try {
+                    Promise.resolve(clipboard.setString(diagnosticText())).then(() => setFeedback("Skopiowano diagnostykę."), () => setFeedback("Zrób zrzut ekranu powyższej diagnostyki."));
+                } catch (_) { setFeedback("Zrób zrzut ekranu powyższej diagnostyki."); }
+            }),
             text("Instrukcja dla właściciela", { fontSize: 20, fontWeight: "700", marginTop: 12 }),
             text("Utwórz jeden kanał tekstowy #tlo-serwera. Daj członkom dostęp do kanału i historii, a wysyłanie pozostaw dla siebie. Wyślij PNG, JPG lub WEBP jako zwykły załącznik. Obraz do 10 MB i 4096 px na bok."),
             text("Możesz dodać podpis: TLO dim=0.45 blur=0. Aby wyłączyć wspólne tło, wyślij: TLO OFF. Po skasowaniu ostatniej grafiki wróci poprzednia dostępna grafika właściciela."),
             text("Każdy członek potrzebuje Revenge Classic i tego pluginu. Sam Revenge nie pobiera tego dodatku. Wersja beta wymaga testu widoczności tła na Twoim telefonie.", { fontSize: 14, color: "#bbc1d0" })
         );
     }
-    return {
-        onLoad() {
-            active = true;
+    function initialize() {
+            if (!active || controller) return Boolean(controller);
             React = safe(() => api.metro.common.React);
             RN = safe(() => api.metro.common.ReactNative);
             if (!React?.createElement || !React?.Component || !RN?.Image || !RN?.View) {
                 compatibility = "Brak zgodnego API React Native. Użyj Revenge Classic.";
-                return;
+                return false;
             }
             Boundary = class extends React.Component {
                 constructor(props) { super(props); this.state = { failed: false }; }
@@ -456,13 +529,15 @@ function createPlugin(api, defaults) {
             };
             function store(name) { return safe(() => api.metro.findByStoreName(name), null); }
             stores = { selected: store("SelectedChannelStore"), channels: store("ChannelStore"),
-                guilds: store("GuildStore"), messages: store("MessageStore"), guildChannels: store("GuildChannelStore") };
+                guilds: store("GuildStore"), messages: store("MessageStore"), guildChannels: store("GuildChannelStore"),
+                selectedGuild: store("SelectedGuildStore"), users: store("UserStore") };
             http = safe(() => api.metro.findByProps("getAPIBaseURL"), null);
             dispatcher = safe(() => api.metro.common.FluxDispatcher, null);
             if (!http?.get || !stores.channels?.getChannel || !stores.guilds?.getGuild || !stores.selected?.getChannelId) {
-                compatibility = "Nie znaleziono zgodnego API kanałów lub odczytu wiadomości. Dodatek wymaga dostosowania do tej wersji Discorda.";
+                const missing = [!http?.get && "odczyt wiadomości", !stores.channels?.getChannel && "kanały", !stores.guilds?.getGuild && "serwery", !stores.selected?.getChannelId && "wybrany kanał"].filter(Boolean);
+                compatibility = "Nie znaleziono API: " + missing.join(", ") + ". Użyj Odśwież po otwarciu kanału.";
                 notify();
-                return;
+                return false;
             }
             controller = createController({
                 getGuild: id => stores.guilds.getGuild(id), getChannel, getChannels: channelsInGuild,
@@ -499,16 +574,30 @@ function createPlugin(api, defaults) {
             }
             if (!chatPatched) later(retryPatch, 5000);
             void refresh(false);
+            return true;
+    }
+    return {
+        onLoad() {
+            active = true;
+            let attempts = 0;
+            function retryInitialize() {
+                if (!active || controller || attempts++ >= 12) return;
+                if (!initialize()) later(retryInitialize, 3000);
+            }
+            retryInitialize();
         },
         onUnload() {
             active = false;
             renderEnabled = false;
             controller?.stop();
+            controller = null;
             timers.forEach(timer => clearTimeout(timer));
             timers.clear();
             cleanup.splice(0).reverse().forEach(fn => safe(fn));
             chatPatched = false;
             brokenImages.clear();
+            Object.assign(viewState, { channelId: "", imageKey: "", image: "Obraz nie został jeszcze przekazany do widoku czatu.", surfaceCount: 0 });
+            compatibility = "Dodatek nie jest uruchomiony.";
             notify();
         },
         settings: Settings
@@ -517,5 +606,5 @@ function createPlugin(api, defaults) {
 
 // Node exports are removed from the installable bundle by the build script.
 
-return createPlugin(vendetta, {"name":"SG Server Backgrounds","version":"0.1.0-beta.2","targetGuildId":"","channelName":"tlo-serwera","dim":0.45,"blur":0,"refreshMs":300000,"minFetchMs":30000,"maxImageBytes":10485760,"maxImageDimension":4096});
+return createPlugin(vendetta, {"name":"SG Server Backgrounds","version":"0.1.0-beta.3","targetGuildId":"","channelName":"tlo-serwera","dim":0.45,"blur":0,"refreshMs":300000,"minFetchMs":30000,"maxImageBytes":10485760,"maxImageDimension":4096});
 })()
