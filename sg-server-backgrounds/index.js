@@ -399,6 +399,7 @@ function createPlugin(api, defaults) {
         }, text(label, { marginBottom: 0, textAlign: "center", fontWeight: "700" }));
         return el(RN.ScrollView, { style: { flex: 1, backgroundColor: "#13151b" }, contentContainerStyle: { padding: 20, paddingBottom: 60 } },
             text(defaults.name, { fontSize: 24, fontWeight: "800" }),
+            text("By DonMillson", { fontSize: 16, fontWeight: "700", color: "#ec72a3" }),
             text("Własna grafika za wiadomościami. Obraz publikuje właściciel w #" + (settings.channelName || defaults.channelName) + "."),
             el(RN.View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
                 text("Włącz tło", { marginBottom: 0 }),
@@ -516,5 +517,5 @@ function createPlugin(api, defaults) {
 
 // Node exports are removed from the installable bundle by the build script.
 
-return createPlugin(vendetta, {"name":"SG Server Backgrounds","version":"0.1.0-beta.1","targetGuildId":"","channelName":"tlo-serwera","dim":0.45,"blur":0,"refreshMs":300000,"minFetchMs":30000,"maxImageBytes":10485760,"maxImageDimension":4096});
+return createPlugin(vendetta, {"name":"SG Server Backgrounds","version":"0.1.0-beta.2","targetGuildId":"","channelName":"tlo-serwera","dim":0.45,"blur":0,"refreshMs":300000,"minFetchMs":30000,"maxImageBytes":10485760,"maxImageDimension":4096});
 })()

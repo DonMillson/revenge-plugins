@@ -1,6 +1,8 @@
 # SG Server Backgrounds
 
-Wspólna grafika za wiadomościami na serwerze Discorda. Plugin dla **Revenge Classic na Androidzie**, wersja **0.1.0-beta.1**.
+**By DonMillson**
+
+Wspólna grafika za wiadomościami na serwerze Discorda. Plugin dla **Revenge Classic na Androidzie**, wersja **0.1.0-beta.2**.
 
 ## Instalacja
 
