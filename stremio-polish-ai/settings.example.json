@@ -1,0 +1,9 @@
+{
+  "stream_addons": [
+    "https://torrentio.strem.fun/manifest.json"
+  ],
+  "enable_stremio_local_torrents": true,
+  "subtitle_addons": [
+    "https://opensubtitles-v3.strem.io/manifest.json"
+  ]
+}
